@@ -18,7 +18,7 @@ import { Text as DreiText, Edges } from '@react-three/drei';
 import * as THREE from 'three';
 import {
   RACK_DIM, COMPUTE_RACK_UNITS, SWITCH_RACK_UNITS,
-  NODE_DIM, NODE_PARTS, NPU_GRID, DIES_PER_NPU, NPUS_PER_NODE,
+  NODE_DIM, NODE_PARTS, DIES_PER_NPU, NPUS_PER_NODE,
   UB_LEVELS, COMM_PATTERNS, RACK_COLORS,
   buildHall, CAB_W, CAB_H, CAB_D,
   type RackKind, type RackUnit, type NodePart, type GenSpec, type CabinetCell,
@@ -335,10 +335,9 @@ export function RackScene({ rackKind, label, onHoverInfo, onSelectNode }: SceneC
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 3. Compute node (blade) — with die / process / thread overlays
+// 3. Compute node (blade) — static structure (die-level detail)
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface NodeOverlays { mesh: boolean; ring: boolean; a2a: boolean; thread: boolean; }
 const S_NODE = 3.2;   // node view scale
 
 function NodePartMesh({ part, hovered, onHover }: {
@@ -411,83 +410,10 @@ function segGeo(segments: number[]): THREE.BufferGeometry {
   return g;
 }
 
-/** Overlay lines: L1 board 2D-mesh, ring all-reduce, all-to-all, die-internal threads. */
-function NodeOverlayLines({ overlays }: { overlays: NodeOverlays }) {
-  const S = S_NODE;
-  const npu = useMemo(() => NODE_PARTS.filter((p) => p.type === 'npu'), []);
-  const pos = (i: number): [number, number, number] => [npu[i].pos[0] * S, 0.05 * S, npu[i].pos[2] * S];
+/** Process(rank) / thread-level comm overlays — rendered in the UB hierarchy view. */
+export interface CommOverlays { ring: boolean; a2a: boolean; thread: boolean; }
 
-  const meshGeo = useMemo(() => {
-    const seg: number[] = [];
-    // grid neighbours (right + down) → 2D mesh
-    for (let r = 0; r < NPU_GRID.rows; r++) {
-      for (let c = 0; c < NPU_GRID.cols; c++) {
-        const i = r * NPU_GRID.cols + c;
-        if (i >= npu.length) continue;
-        if (c + 1 < NPU_GRID.cols) { const j = i + 1; seg.push(...pos(i), ...pos(j)); }
-        if (r + 1 < NPU_GRID.rows) { const j = i + NPU_GRID.cols; if (j < npu.length) seg.push(...pos(i), ...pos(j)); }
-      }
-    }
-    return segGeo(seg);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [npu]);
-
-  const ringGeo = useMemo(() => {
-    const seg: number[] = [];
-    // snake ring over the 2×4 grid: 0-1-2-3-7-6-5-4-0
-    const order = [0, 1, 2, 3, 7, 6, 5, 4];
-    for (let k = 0; k < order.length; k++) {
-      const a = order[k], b = order[(k + 1) % order.length];
-      if (a < npu.length && b < npu.length) seg.push(...pos(a), ...pos(b));
-    }
-    return segGeo(seg);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [npu]);
-
-  const a2aGeo = useMemo(() => {
-    const seg: number[] = [];
-    for (let i = 0; i < npu.length; i++)
-      for (let j = i + 1; j < npu.length; j++) seg.push(...pos(i), ...pos(j));
-    return segGeo(seg);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [npu]);
-
-  const threadGeo = useMemo(() => {
-    const seg: number[] = [];
-    // per die: small fan of "AI core / thread" lines rising from the die top
-    for (let i = 0; i < npu.length; i++) {
-      const [x, , z] = pos(i);
-      const top = 0.09 * S;
-      for (let d = 0; d < DIES_PER_NPU; d++) {
-        const dx = (d - (DIES_PER_NPU - 1) / 2) * npu[i].size[0] * S * 0.46;
-        for (let t = -2; t <= 2; t++) {
-          seg.push(x + dx, 0.05 * S, z, x + dx + t * 0.012 * S, top, z + 0.02 * S * (t % 2));
-        }
-      }
-    }
-    return segGeo(seg);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [npu]);
-
-  return (
-    <group>
-      {overlays.mesh && (
-        <lineSegments geometry={meshGeo}><lineBasicMaterial color={L(1)} transparent opacity={0.85} /></lineSegments>
-      )}
-      {overlays.a2a && (
-        <lineSegments geometry={a2aGeo}><lineBasicMaterial color={COMM_PATTERNS[1].color} transparent opacity={0.3} /></lineSegments>
-      )}
-      {overlays.ring && (
-        <lineSegments geometry={ringGeo}><lineBasicMaterial color={COMM_PATTERNS[0].color} transparent opacity={0.9} /></lineSegments>
-      )}
-      {overlays.thread && (
-        <lineSegments geometry={threadGeo}><lineBasicMaterial color={COMM_PATTERNS[2].color} transparent opacity={0.7} /></lineSegments>
-      )}
-    </group>
-  );
-}
-
-export function NodeScene({ onHoverInfo, overlays }: SceneCallbacks & { overlays: NodeOverlays }) {
+export function NodeScene({ onHoverInfo }: SceneCallbacks) {
   const [hoverId, setHoverId] = useState<string | null>(null);
   const S = S_NODE;
   const w = NODE_DIM.w * S, h = NODE_DIM.h * S, d = NODE_DIM.d * S;
@@ -524,7 +450,6 @@ export function NodeScene({ onHoverInfo, overlays }: SceneCallbacks & { overlays
             }}
           />
         ))}
-        <NodeOverlayLines overlays={overlays} />
       </group>
     </group>
   );
@@ -539,11 +464,44 @@ const HT = {
   xSpan: 9.5,
 };
 
-export function TopologyScene({ gen, onHoverInfo }: SceneCallbacks & { gen: GenSpec }) {
+export function TopologyScene({ gen, overlays, onHoverInfo }: SceneCallbacks & { gen: GenSpec; overlays: CommOverlays }) {
   const [hov, setHov] = useState<number | null>(null);
 
   // node-tier sample positions (8 NPU dots) for L0/L1 illustration
   const dieX = (i: number) => (i / 7 - 0.5) * 2.2;
+  // rank dots at the L1 tier (one process / rank per NPU)
+  const rankX = (i: number) => (i / 7 - 0.5) * 2.6;
+
+  // ── process(rank) + thread comm overlays ──
+  const ringGeo = useMemo(() => {
+    const seg: number[] = [];
+    const order = [0, 1, 2, 3, 7, 6, 5, 4];   // snake ring over the 2×4 rank grid
+    const y = HT.y[1] + 0.18;
+    for (let k = 0; k < order.length; k++) {
+      const a = order[k], b = order[(k + 1) % order.length];
+      seg.push(rankX(a), y, 0.16, rankX(b), y, 0.16);
+    }
+    return segGeo(seg);
+  }, []);
+
+  const a2aGeo = useMemo(() => {
+    const seg: number[] = [];
+    const y = HT.y[1] + 0.18;
+    for (let i = 0; i < 8; i++) for (let j = i + 1; j < 8; j++) seg.push(rankX(i), y, -0.16, rankX(j), y, -0.16);
+    return segGeo(seg);
+  }, []);
+
+  const threadGeo = useMemo(() => {
+    const seg: number[] = [];
+    // per die at L0: small fan of AI-core / thread lines rising from the die
+    for (let i = 0; i < 8; i++) {
+      for (let d = 0; d < DIES_PER_NPU; d++) {
+        const x = dieX(i) + (d - (DIES_PER_NPU - 1) / 2) * 0.11;
+        for (let t = -2; t <= 2; t++) seg.push(x, HT.y[0] + 0.05, 0, x + t * 0.02, HT.y[0] + 0.32, 0.05 * (t % 2));
+      }
+    }
+    return segGeo(seg);
+  }, []);
 
   // counts text per level
   const levelInfo = (lvl: number): string => {
@@ -646,8 +604,37 @@ export function TopologyScene({ gen, onHoverInfo }: SceneCallbacks & { gen: GenS
         </mesh>
       ))}
 
+      {/* ── process(rank) / thread comm overlays (toggled in toolbar) ── */}
+      {overlays.thread && (
+        <group
+          onPointerOver={(e) => { e.stopPropagation(); onHoverInfo(`线程级：die 内 AI Core / 线程并行计算流（L0 片内）`); }}
+          onPointerOut={() => onHoverInfo(null)}
+        >
+          <lineSegments geometry={threadGeo}><lineBasicMaterial color={COMM_PATTERNS[2].color} transparent opacity={0.8} /></lineSegments>
+          <Text position={[dieX(7) + 0.5, HT.y[0] + 0.3, 0]} fontSize={0.14} color={COMM_PATTERNS[2].color} anchorX="left">{COMM_PATTERNS[2].label}</Text>
+        </group>
+      )}
+      {overlays.a2a && (
+        <group
+          onPointerOver={(e) => { e.stopPropagation(); onHoverInfo(`进程级 All-to-All（MoE 专家并行）：rank 间全互联，经 L1/L2 UB 直连 + L3 Clos`); }}
+          onPointerOut={() => onHoverInfo(null)}
+        >
+          <lineSegments geometry={a2aGeo}><lineBasicMaterial color={COMM_PATTERNS[1].color} transparent opacity={0.4} /></lineSegments>
+          <Text position={[rankX(7) + 0.4, HT.y[1] + 0.18, -0.16]} fontSize={0.14} color={COMM_PATTERNS[1].color} anchorX="left">All-to-All</Text>
+        </group>
+      )}
+      {overlays.ring && (
+        <group
+          onPointerOver={(e) => { e.stopPropagation(); onHoverInfo(`进程级 Ring-AllReduce（数据并行梯度规约）：rank 环形通信，沿 UB 2D-Mesh`); }}
+          onPointerOut={() => onHoverInfo(null)}
+        >
+          <lineSegments geometry={ringGeo}><lineBasicMaterial color={COMM_PATTERNS[0].color} transparent opacity={0.9} /></lineSegments>
+          <Text position={[rankX(7) + 0.4, HT.y[1] + 0.18, 0.16]} fontSize={0.14} color={COMM_PATTERNS[0].color} anchorX="left">Ring AllReduce</Text>
+        </group>
+      )}
+
       <Text position={[0, 0.04, 2.4]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.2} color={LC.textDim} anchorX="center">
-        {`${TOK.ubmesh} 互联层级 · ${gen.code} ${gen.name} · 悬停查看各级带宽（来源见信息面板）`}
+        {`${TOK.ubmesh} 互联层级 · ${gen.code} ${gen.name} · 悬停查看各级带宽 · 顶栏开关叠加进程/线程级通信`}
       </Text>
     </group>
   );

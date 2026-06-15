@@ -9,9 +9,9 @@
 // All product/brand display text is sourced from ../content (stored base64 and
 // decoded at runtime), so this source file carries no plaintext product names.
 // ─────────────────────────────────────────────────────────────────────────────
-import { TOK, INFO, SOURCES } from '../content';
+import { TOK, INFO, SOURCES, CHANGES } from '../content';
 
-export { INFO, SOURCES };
+export { INFO, SOURCES, CHANGES };
 
 export type RackKind = 'compute' | 'switch';
 export type ViewMode = 'overview' | 'rack' | 'node' | 'topology';

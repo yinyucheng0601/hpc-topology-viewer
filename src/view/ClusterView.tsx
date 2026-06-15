@@ -15,12 +15,12 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import {
-  INFO, SOURCES, GENERATIONS, DEFAULT_GEN, UB_LEVELS, COMM_PATTERNS,
+  INFO, SOURCES, CHANGES, GENERATIONS, DEFAULT_GEN, UB_LEVELS, COMM_PATTERNS,
   type Gen, type RackKind, type ViewMode,
 } from '../scene/data';
 import { TOK, FOOTNOTE } from '../content';
 import {
-  OverviewScene, RackScene, NodeScene, TopologyScene, type NodeOverlays,
+  OverviewScene, RackScene, NodeScene, TopologyScene, type CommOverlays,
 } from '../scene/scenes';
 
 const CAMERA: Record<ViewMode, { pos: [number, number, number]; target: [number, number, number] }> = {
@@ -37,8 +37,7 @@ const MODE_TABS: { id: ViewMode; label: string }[] = [
   { id: 'topology', label: 'UB 互联层级' },
 ];
 
-const OVERLAY_TABS: { id: keyof NodeOverlays; label: string; color: string }[] = [
-  { id: 'mesh',   label: 'L1 板载 2D-Mesh', color: UB_LEVELS[1].color },
+const OVERLAY_TABS: { id: keyof CommOverlays; label: string; color: string }[] = [
   { id: 'ring',   label: COMM_PATTERNS[0].label, color: COMM_PATTERNS[0].color },
   { id: 'a2a',    label: COMM_PATTERNS[1].label, color: COMM_PATTERNS[1].color },
   { id: 'thread', label: COMM_PATTERNS[2].label, color: COMM_PATTERNS[2].color },
@@ -51,7 +50,7 @@ export function ClusterView() {
   const [nodeSlot, setNodeSlot] = useState(0);
   const [hoverInfo, setHoverInfo] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
-  const [overlays, setOverlays] = useState<NodeOverlays>({ mesh: true, ring: false, a2a: false, thread: false });
+  const [overlays, setOverlays] = useState<CommOverlays>({ ring: false, a2a: false, thread: false });
 
   const spec = GENERATIONS[gen];
   const onHoverInfo = useCallback((t: string | null) => setHoverInfo(t), []);
@@ -129,8 +128,8 @@ export function ClusterView() {
             </button>
           ))}
         </div>
-        {/* node overlay toggles */}
-        {mode === 'node' && (
+        {/* process / thread comm overlay toggles (UB hierarchy view) */}
+        {mode === 'topology' && (
           <div style={{ display: 'flex', gap: 4, borderLeft: '1px solid rgba(0,0,0,0.12)', paddingLeft: 12 }}>
             {OVERLAY_TABS.map((t) => {
               const on = overlays[t.id];
@@ -200,8 +199,8 @@ export function ClusterView() {
             {mode === 'rack' && (
               <RackScene rackKind={rackKind} label={rackLabel} onHoverInfo={onHoverInfo} onSelectNode={(slot) => { setNodeSlot(slot); setMode('node'); }} />
             )}
-            {mode === 'node' && <NodeScene onHoverInfo={onHoverInfo} overlays={overlays} />}
-            {mode === 'topology' && <TopologyScene gen={spec} onHoverInfo={onHoverInfo} />}
+            {mode === 'node' && <NodeScene onHoverInfo={onHoverInfo} />}
+            {mode === 'topology' && <TopologyScene gen={spec} overlays={overlays} onHoverInfo={onHoverInfo} />}
 
             <OrbitControls
               target={cam.target}
@@ -236,9 +235,9 @@ export function ClusterView() {
                 </span>
               ))}
             </div>
-            {mode === 'node' && (
+            {mode === 'topology' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: 4 }}>
-                <div style={{ fontSize: 10.5, fontWeight: 600, color: 'rgba(0,0,0,0.6)' }}>进程 / 线程级通信（叠加层）</div>
+                <div style={{ fontSize: 10.5, fontWeight: 600, color: 'rgba(0,0,0,0.6)' }}>进程 / 线程级通信（顶栏开关）</div>
                 {COMM_PATTERNS.map((c) => (
                   <span key={c.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                     <span style={{ width: 12, height: 3, background: c.color, display: 'inline-block', borderRadius: 1 }} />
@@ -273,6 +272,11 @@ export function ClusterView() {
                 ))}
               </tbody>
             </table>
+
+            <div style={{ margin: '14px 0 6px', fontSize: 12, fontWeight: 600, color: 'rgba(0,0,0,0.75)' }}>相比 A3 的演进</div>
+            <ul style={{ margin: 0, paddingLeft: 16, color: 'rgba(0,0,0,0.7)', fontSize: 11.5, lineHeight: 1.6 }}>
+              {CHANGES.map((c, i) => (<li key={i} style={{ marginBottom: 4 }}>{c}</li>))}
+            </ul>
 
             <div style={{ margin: '14px 0 6px', fontSize: 12, fontWeight: 600, color: 'rgba(0,0,0,0.75)' }}>数据来源</div>
             <div style={{ fontSize: 10.5, color: 'rgba(0,0,0,0.55)', lineHeight: 1.7 }}>
