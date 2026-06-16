@@ -266,19 +266,34 @@ export function npuPositions(): [number, number, number][] {
 // ─── Small-pod scales (16P / 32P / 64P) + recursive full-mesh adjacency ───────
 // Recursive direct-connect full-mesh: 8 NPU/board form a 1D full mesh, boards
 // form the next dimension, etc. (single 64-card cabinet = 8×8).
-export type Scale = '16P' | '32P' | '64P';
-export interface ScaleSpec { id: Scale; label: string; npus: number; dims: number[]; }
+export type Scale = '16P' | '32P' | '32Pi' | '64P';
+export interface ScaleSpec {
+  id: Scale; label: string; npus: number; dims: number[];
+  kind?: 'mesh' | 'switched';   // switched = single-hop fully-switched fabric
+  paths?: number;               // parallel switch paths between any two NPUs
+  uboe?: [number, number];      // external ethernet uplink ports per NPU (min, max)
+}
 export const SCALES: Record<Scale, ScaleSpec> = {
-  '16P': { id: '16P', label: '16P 小超节点', npus: 16, dims: [8, 2] },
-  '32P': { id: '32P', label: '32P 小超节点', npus: 32, dims: [8, 4] },
-  '64P': { id: '64P', label: '64P 单柜',     npus: 64, dims: [8, 8] },
+  '16P':  { id: '16P',  label: '16P 小超节点',     npus: 16, dims: [8, 2] },
+  '32P':  { id: '32P',  label: '32P 小超节点',     npus: 32, dims: [8, 4] },
+  '32Pi': { id: '32Pi', label: '32P 一体(单跳)',   npus: 32, dims: [32], kind: 'switched', paths: 6, uboe: [1, 2] },
+  '64P':  { id: '64P',  label: '64P 单柜',         npus: 64, dims: [8, 8] },
 };
 export const DEFAULT_SCALE: Scale = '64P';
 
 /** dim index → UB hierarchy level index (dim0=板内→L1, dim1=跨板→L2, dim2=跨柜→L3). */
 export const dimToLevel = (d: number): number => Math.min(d + 1, UB_LEVELS.length - 1);
 
-export interface AdjCell { level: number; direct: boolean; hops: number; }
+export interface AdjCell { level: number; direct: boolean; hops: number; paths?: number; }
+
+/** 32P-integrated single-hop fully-switched fabric: any two NPUs reachable in one
+ *  hop via the switch, with `paths` parallel switch paths between every pair. */
+export function makeSwitchedAdjacency(n: number, paths: number): { n: number; cell: (i: number, j: number) => AdjCell } {
+  return {
+    n,
+    cell: (i, j) => (i === j ? { level: -1, direct: false, hops: 0 } : { level: 3, direct: true, hops: 1, paths }),
+  };
+}
 
 /** Recursive full-mesh adjacency for `dims`: two NPUs are directly UB-connected iff they
  *  differ in exactly one dimension; otherwise multi-hop. Cell colour = the

@@ -21,7 +21,7 @@ import {
   NODE_DIM, NODE_PARTS, NPU_GRID, DIES_PER_NPU, NPUS_PER_NODE,
   UB_LEVELS, COMM_PATTERNS, RACK_COLORS,
   buildHall, CAB_W, CAB_H, CAB_D,
-  SCALES, makeAdjacency, TRACE_SCHED,
+  SCALES, makeAdjacency, makeSwitchedAdjacency, TRACE_SCHED,
   type RackKind, type RackUnit, type NodePart, type GenSpec, type CabinetCell, type Scale,
 } from './data';
 import { TOK } from '../content';
@@ -666,14 +666,14 @@ function IoDieDetail({ onHoverInfo, onJump }: { onHoverInfo: (t: string | null) 
         <Slab size={[0.34, 0.09, 0.26]} position={switchPos} color={L(3)} emissive={L(3)} emissiveIntensity={0.5} edgeColor={L(3)} />
         <Text position={[switchPos[0], 0.12, switchPos[2]]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.07} color="#fff" anchorX="center">On-Chip SW · 9口转发</Text>
       </group>
-      {/* CCU collective engine */}
+      {/* collective engine */}
       <group
         onPointerOver={(e) => { e.stopPropagation(); setCursor(true); onHoverInfo(`${TOK.ccu}（集合通信单元）：硬件卸载 AllReduce / All2All / ReduceScatter 等，自行搬运+Reduce，释放 AI Core · 点击→UB 互联高亮`); }}
         onPointerOut={() => { setCursor(false); onHoverInfo(null); }}
         onClick={(e) => { e.stopPropagation(); onJump?.({ view: 'topology', focus: 'ccu' }); }}
       >
         <Slab size={[0.34, 0.09, 0.22]} position={[-0.55, 0.05, -hz + 0.22]} color={COMM_PATTERNS[0].color} emissive={COMM_PATTERNS[0].color} emissiveIntensity={0.4} edgeColor={COMM_PATTERNS[0].color} />
-        <Text position={[-0.55, 0.12, -hz + 0.22]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.075} color="#fff" anchorX="center">CCU 集合通信</Text>
+        <Text position={[-0.55, 0.12, -hz + 0.22]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.075} color="#fff" anchorX="center">{`${TOK.ccu} 集合通信`}</Text>
       </group>
       {/* protocol legend */}
       <Text position={[0.5, 0.05, -hz + 0.18]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.07} color={LC.textDim} anchorX="center" maxWidth={1.0}>
@@ -969,7 +969,7 @@ export function TopologyScene({ gen, overlays, highlight, subFocus, onHoverInfo 
         onPointerOut={() => { setCursor(false); onHoverInfo(null); }}
       >
         <Slab size={[0.55, 0.18, 0.3]} color={COMM_PATTERNS[0].color} emissive={COMM_PATTERNS[0].color} emissiveIntensity={subFocus === 'ccu' ? 1.0 : 0.4} edgeColor={subFocus === 'ccu' ? '#fff' : COMM_PATTERNS[0].color} />
-        <Text position={[0, 0.16, 0]} fontSize={0.12} color={COMM_PATTERNS[0].color} anchorX="center">CCU 集合通信</Text>
+        <Text position={[0, 0.16, 0]} fontSize={0.12} color={COMM_PATTERNS[0].color} anchorX="center">{`${TOK.ccu} 集合通信`}</Text>
         {subFocus === 'ccu' && <Text position={[0, -0.18, 0]} fontSize={0.1} color={COMM_PATTERNS[0].color} anchorX="center">← 来自 IO Die</Text>}
       </group>
       <group
@@ -984,7 +984,7 @@ export function TopologyScene({ gen, overlays, highlight, subFocus, onHoverInfo 
       </group>
 
       <Text position={[0, 0.04, 2.6]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.19} color={LC.textDim} anchorX="center">
-        {`${TOK.ubmesh}：层内=UB 全互联(full-mesh) · 框=刀片/机柜 · CCU 卸载集合通信 · On-Chip SW 片上转发`}
+        {`${TOK.ubmesh}：层内=UB 全互联(full-mesh) · 框=刀片/机柜 · ${TOK.ccu} 卸载集合通信 · On-Chip SW 片上转发`}
       </Text>
     </group>
   );
@@ -1028,8 +1028,13 @@ const MAT_POS: [number, number, number] = [-3.7, 2.2, 0];
 const MODEL_POS: [number, number, number] = [3.3, 0.5, 0];
 
 export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale: Scale }) {
-  const dims = SCALES[scale].dims;
-  const { n, cell } = useMemo(() => makeAdjacency(dims), [dims]);
+  const spec = SCALES[scale];
+  const dims = spec.dims;
+  const switched = spec.kind === 'switched';
+  const paths = spec.paths ?? 6;
+  const { n, cell } = useMemo(() => switched ? makeSwitchedAdjacency(spec.npus, paths) : makeAdjacency(dims),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scale]);
   const ref = useRef<THREE.InstancedMesh>(null);
   const modelRef = useRef<THREE.InstancedMesh>(null);
   const lastMat = useRef(-1);     // guard: only setState when hovered cell changes
@@ -1073,8 +1078,29 @@ export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale:
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }, [n, cell, cellSize]);
 
-  // ── 3D scale model positions (boards × 8 NPU) + blade/cabinet bounds ──
-  const { posArr, l1Pts, l2Pts, boardBoxes, cabBox } = useMemo(() => {
+  // ── 3D scale model positions + links ──
+  const hub: [number, number, number] = [0, 0, 0];
+  const { posArr, l1Pts, l2Pts, boardBoxes, cabBox, spokes, uboePts } = useMemo(() => {
+    const empty: [number, number, number][] = [];
+    if (switched) {
+      // ring of NPUs around a central switch hub (single-hop fully switched)
+      const R = 1.7;
+      const P: [number, number, number][] = Array.from({ length: n }, (_, k) => {
+        const a = (k / n) * Math.PI * 2 - Math.PI / 2;
+        return [Math.cos(a) * R, Math.sin(a) * R, 0];
+      });
+      const spokes: [number, number, number][] = [];
+      const uboePts: [number, number, number][] = [];
+      for (const p of P) {
+        spokes.push(p, hub);
+        const len = Math.hypot(p[0], p[1]) || 1;
+        const ux = p[0] / len, uy = p[1] / len;
+        // 1–2 external ethernet uplink stubs pointing outward
+        uboePts.push([p[0], p[1], 0], [p[0] + ux * 0.26, p[1] + uy * 0.26, 0]);
+        uboePts.push([p[0] + ux * 0.06, p[1] + uy * 0.06, 0.05], [p[0] + ux * 0.3, p[1] + uy * 0.3, 0.05]);
+      }
+      return { posArr: P, l1Pts: empty, l2Pts: empty, boardBoxes: [] as { idx: number; cx: number; cy: number; w: number; h: number }[], cabBox: { cx: 0, cy: 0, w: 0, h: 0 }, spokes, uboePts };
+    }
     const perBoard = dims[0], nb = dims[1];
     const bcols = nb <= 2 ? nb : (nb <= 4 ? 2 : 4);
     const lc4 = 4, npuP = 0.34, gapX = 0.6, gapY = 0.7;
@@ -1105,8 +1131,9 @@ export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale:
       if (!a.direct) continue;
       (a.level <= 1 ? l1Pts : l2Pts).push(P[i], P[j]);
     }
-    return { posArr: P, l1Pts, l2Pts, boardBoxes, cabBox };
-  }, [dims, n, cell]);
+    return { posArr: P, l1Pts, l2Pts, boardBoxes, cabBox, spokes: empty, uboePts: empty };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scale, n, cell]);
 
   const boardOf = (k: number) => Math.floor(k / dims[0]);
   const localOf = (k: number) => k % dims[0];
@@ -1152,6 +1179,7 @@ export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale:
             setHoverCell([i, j]); setHoverNpu(null);
             const a = cell(i, j);
             const desc = a.hops === 0 ? '对角（自身）'
+              : switched ? `单跳交换可达 · ${a.paths} 条交换通路`
               : a.direct ? `直连 · ${UB_LEVELS[a.level].id} ${UB_LEVELS[a.level].label}`
               : `多跳 ×${a.hops}（经 ${UB_LEVELS[a.level].id}）`;
             onHoverInfo(`NPU ${i} ↔ NPU ${j}：${desc}（右侧 3D 同步高亮）`);
@@ -1161,8 +1189,8 @@ export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale:
           <planeGeometry args={[1, 1]} />
           <meshBasicMaterial toneMapped={false} />
         </instancedMesh>
-        {/* board boundary lines (every dims[0] cells) */}
-        {Array.from({ length: dims[1] + 1 }, (_, b) => {
+        {/* board boundary lines (mesh mode only; every dims[0] cells) */}
+        {!switched && Array.from({ length: dims[1] + 1 }, (_, b) => {
           const o = -MAT_SPAN / 2 + (MAT_SPAN / dims[1]) * b;
           return (
             <group key={b}>
@@ -1187,15 +1215,29 @@ export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale:
         <Text position={[-MAT_SPAN / 2 - 0.28, 0, 0]} rotation={[0, 0, Math.PI / 2]} fontSize={0.15} color={LC.textDim} anchorX="center">NPU i →</Text>
       </group>
 
-      {/* ── right: 3D scale model (boards × 8 NPU) with UB links ── */}
+      {/* ── right: 3D scale model with UB links ── */}
       <group position={MODEL_POS}>
-        {/* cabinet enclosure (≤64P all within one cabinet) */}
-        <mesh position={[cabBox.cx, cabBox.cy, -0.12]}>
-          <planeGeometry args={[cabBox.w, cabBox.h]} />
-          <meshBasicMaterial color="#eef1f6" transparent opacity={0.5} />
-        </mesh>
-        <Line points={[[cabBox.cx - cabBox.w / 2, cabBox.cy - cabBox.h / 2, -0.11], [cabBox.cx + cabBox.w / 2, cabBox.cy - cabBox.h / 2, -0.11], [cabBox.cx + cabBox.w / 2, cabBox.cy + cabBox.h / 2, -0.11], [cabBox.cx - cabBox.w / 2, cabBox.cy + cabBox.h / 2, -0.11], [cabBox.cx - cabBox.w / 2, cabBox.cy - cabBox.h / 2, -0.11]]} color={LC.rackEdge} lineWidth={1.5} />
-        <Text position={[cabBox.cx - cabBox.w / 2 + 0.05, cabBox.cy + cabBox.h / 2 + 0.12, 0]} fontSize={0.13} color={LC.textDim} anchorX="left">单柜 (1 cabinet)</Text>
+        {/* switched (32P 一体): central switch hub + single-hop spokes + ethernet stubs */}
+        {switched && (
+          <group>
+            <Line points={spokes} segments color={L(3)} lineWidth={hi.npus.length ? 1.2 : 2.4} transparent opacity={hi.npus.length ? 0.25 : 0.7} />
+            <Line points={uboePts} segments color={L(4)} lineWidth={2} transparent opacity={0.8} />
+            <mesh position={hub}><boxGeometry args={[0.5, 0.5, 0.3]} /><meshStandardMaterial color={L(3)} emissive={L(3)} emissiveIntensity={0.5} /></mesh>
+            <Text position={[0, 0, 0.25]} fontSize={0.13} color="#fff" anchorX="center">交换</Text>
+            <Text position={[0, -0.42, 0]} fontSize={0.12} color={L(3)} anchorX="center">{`任意两片单跳 · ×${paths} 通路`}</Text>
+          </group>
+        )}
+        {/* cabinet enclosure (mesh mode: ≤64P all within one cabinet) */}
+        {!switched && (
+          <group>
+            <mesh position={[cabBox.cx, cabBox.cy, -0.12]}>
+              <planeGeometry args={[cabBox.w, cabBox.h]} />
+              <meshBasicMaterial color="#eef1f6" transparent opacity={0.5} />
+            </mesh>
+            <Line points={[[cabBox.cx - cabBox.w / 2, cabBox.cy - cabBox.h / 2, -0.11], [cabBox.cx + cabBox.w / 2, cabBox.cy - cabBox.h / 2, -0.11], [cabBox.cx + cabBox.w / 2, cabBox.cy + cabBox.h / 2, -0.11], [cabBox.cx - cabBox.w / 2, cabBox.cy + cabBox.h / 2, -0.11], [cabBox.cx - cabBox.w / 2, cabBox.cy - cabBox.h / 2, -0.11]]} color={LC.rackEdge} lineWidth={1.5} />
+            <Text position={[cabBox.cx - cabBox.w / 2 + 0.05, cabBox.cy + cabBox.h / 2 + 0.12, 0]} fontSize={0.13} color={LC.textDim} anchorX="left">单柜 (1 cabinet)</Text>
+          </group>
+        )}
         {/* per-board (blade) trays + labels */}
         {boardBoxes.map((b) => (
           <group key={b.idx}>
@@ -1219,7 +1261,9 @@ export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale:
             if (k === undefined || k === lastModel.current) return;
             lastModel.current = k;
             setHoverNpu(k); setHoverCell(null);
-            onHoverInfo(`NPU ${k}（板 ${boardOf(k)} · 本地 ${localOf(k)}）：板内→L1，跨板→L2（左侧矩阵同步高亮行列）`);
+            onHoverInfo(switched
+              ? `NPU ${k}：经中央交换单跳可达任意 NPU（每对 ${paths} 通路）· 另有 ${spec.uboe?.[0]}-${spec.uboe?.[1]} 个外接 ${TOK.uboe} 端口`
+              : `NPU ${k}（板 ${boardOf(k)} · 本地 ${localOf(k)}）：板内→L1，跨板→L2（左侧矩阵同步高亮行列）`);
           }}
           onPointerOut={() => { lastModel.current = -1; setHoverNpu(null); onHoverInfo(null); }}
         >
@@ -1228,7 +1272,14 @@ export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale:
         </instancedMesh>
         {/* emphasised pair link + i/j tags on the two NPUs */}
         {hi.pair && hi.pair[0] !== hi.pair[1] && cell(hi.pair[0], hi.pair[1]).direct && (
-          <LinkTube a={posArr[hi.pair[0]]} b={posArr[hi.pair[1]]} color={L(cell(hi.pair[0], hi.pair[1]).level)} />
+          switched ? (
+            <group>
+              <LinkTube a={posArr[hi.pair[0]]} b={hub} color={L(3)} />
+              <LinkTube a={hub} b={posArr[hi.pair[1]]} color={L(3)} />
+            </group>
+          ) : (
+            <LinkTube a={posArr[hi.pair[0]]} b={posArr[hi.pair[1]]} color={L(cell(hi.pair[0], hi.pair[1]).level)} />
+          )
         )}
         {hi.pair && hi.pair[0] !== hi.pair[1] && (
           <group>
@@ -1236,8 +1287,8 @@ export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale:
             <Text position={[posArr[hi.pair[1]][0], posArr[hi.pair[1]][1] + 0.2, posArr[hi.pair[1]][2]]} fontSize={0.16} color="#4369ef" anchorX="center">j</Text>
           </group>
         )}
-        <Text position={[0, 2.1, 0]} fontSize={0.22} color={LC.text} anchorX="center">{`${SCALES[scale].label} · 3D 结构（${dims[1]} 板 × ${dims[0]} NPU）`}</Text>
-        <Text position={[0, -2.0, 0]} fontSize={0.14} color={LC.textDim} anchorX="center">{`${dims.join('×')} 递归 full-mesh · 蓝=L1 板内 · 紫=L2 跨板`}</Text>
+        <Text position={[0, 2.1, 0]} fontSize={0.22} color={LC.text} anchorX="center">{switched ? `${spec.label} · 3D 结构（${n} NPU ↔ 中央交换）` : `${spec.label} · 3D 结构（${dims[1]} 板 × ${dims[0]} NPU）`}</Text>
+        <Text position={[0, -2.0, 0]} fontSize={0.14} color={LC.textDim} anchorX="center">{switched ? `单跳全交换 · 每对 ${paths} 通路（橙）· 每片 1-2 外接 ${TOK.uboe}（绿）` : `${dims.join('×')} 递归 full-mesh · 蓝=L1 板内 · 紫=L2 跨板`}</Text>
       </group>
 
       <Text position={[0, 0.02, 4.4]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.22} color={LC.textDim} anchorX="center">
