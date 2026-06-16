@@ -14,7 +14,7 @@ import { TOK, INFO, SOURCES, CHANGES } from '../content';
 export { INFO, SOURCES, CHANGES };
 
 export type RackKind = 'compute' | 'switch';
-export type ViewMode = 'overview' | 'rack' | 'node' | 'topology';
+export type ViewMode = 'overview' | 'rack' | 'node' | 'topology' | 'matrix';
 export type Gen = 'A5' | 'A6';
 
 // ─── Generation specs ────────────────────────────────────────────────────────
@@ -242,3 +242,41 @@ export const NODE_PARTS: NodePart[] = (() => {
 export function npuPositions(): [number, number, number][] {
   return NODE_PARTS.filter((p) => p.type === 'npu').map((p) => p.pos);
 }
+
+// ─── Small-pod scales (16P / 32P / 64P) + recursive full-mesh adjacency ───────
+// Recursive direct-connect full-mesh: 8 NPU/board form a 1D full mesh, boards
+// form the next dimension, etc. (single 64-card cabinet = 8×8).
+export type Scale = '16P' | '32P' | '64P';
+export interface ScaleSpec { id: Scale; label: string; npus: number; dims: number[]; }
+export const SCALES: Record<Scale, ScaleSpec> = {
+  '16P': { id: '16P', label: '16P 小超节点', npus: 16, dims: [8, 2] },
+  '32P': { id: '32P', label: '32P 小超节点', npus: 32, dims: [8, 4] },
+  '64P': { id: '64P', label: '64P 单柜',     npus: 64, dims: [8, 8] },
+};
+export const DEFAULT_SCALE: Scale = '64P';
+
+/** dim index → UB hierarchy level index (dim0=板内→L1, dim1=跨板→L2, dim2=跨柜→L3). */
+export const dimToLevel = (d: number): number => Math.min(d + 1, UB_LEVELS.length - 1);
+
+export interface AdjCell { level: number; direct: boolean; hops: number; }
+
+/** Recursive full-mesh adjacency for `dims`: two NPUs are directly UB-connected iff they
+ *  differ in exactly one dimension; otherwise multi-hop. Cell colour = the
+ *  (highest) differing dimension's UB level. */
+export function makeAdjacency(dims: number[]): { n: number; cell: (i: number, j: number) => AdjCell } {
+  const n = dims.reduce((a, b) => a * b, 1);
+  const coords = (idx: number) => {
+    const c: number[] = [];
+    for (const d of dims) { c.push(idx % d); idx = Math.floor(idx / d); }
+    return c;
+  };
+  const cell = (i: number, j: number): AdjCell => {
+    if (i === j) return { level: -1, direct: false, hops: 0 };
+    const ci = coords(i), cj = coords(j);
+    const diff: number[] = [];
+    for (let d = 0; d < dims.length; d++) if (ci[d] !== cj[d]) diff.push(d);
+    return { level: dimToLevel(diff[diff.length - 1]), direct: diff.length === 1, hops: diff.length };
+  };
+  return { n, cell };
+}
+

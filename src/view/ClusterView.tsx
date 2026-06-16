@@ -16,18 +16,20 @@ import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import {
   INFO, SOURCES, CHANGES, GENERATIONS, DEFAULT_GEN, UB_LEVELS, COMM_PATTERNS,
-  type Gen, type RackKind, type ViewMode,
+  SCALES, DEFAULT_SCALE,
+  type Gen, type RackKind, type ViewMode, type Scale,
 } from '../scene/data';
 import { TOK, FOOTNOTE } from '../content';
 import {
-  OverviewScene, RackScene, NodeScene, TopologyScene, type CommOverlays,
+  OverviewScene, RackScene, NodeScene, TopologyScene, AdjacencyScene, type CommOverlays,
 } from '../scene/scenes';
 
 const CAMERA: Record<ViewMode, { pos: [number, number, number]; target: [number, number, number] }> = {
   overview: { pos: [9, 10, 15], target: [0, 0.5, 0] },
   rack:     { pos: [4.6, 4.4, 8.6], target: [0, 2.8, 0] },
-  node:     { pos: [2.6, 2.8, 3.2], target: [0, 0.5, 0] },
+  node:     { pos: [3.8, 3.2, 4.6], target: [0.8, 0.6, 0] },
   topology: { pos: [0, 4.2, 13], target: [0, 2.9, 0] },
+  matrix:   { pos: [0, 9, 7.5], target: [0, 0, 0] },
 };
 
 const MODE_TABS: { id: ViewMode; label: string }[] = [
@@ -35,12 +37,17 @@ const MODE_TABS: { id: ViewMode; label: string }[] = [
   { id: 'rack',     label: '机柜视图' },
   { id: 'node',     label: '节点视图' },
   { id: 'topology', label: 'UB 互联层级' },
+  { id: 'matrix',   label: '邻接矩阵' },
 ];
 
-const OVERLAY_TABS: { id: keyof CommOverlays; label: string; color: string }[] = [
-  { id: 'ring',   label: COMM_PATTERNS[0].label, color: COMM_PATTERNS[0].color },
-  { id: 'a2a',    label: COMM_PATTERNS[1].label, color: COMM_PATTERNS[1].color },
-  { id: 'thread', label: COMM_PATTERNS[2].label, color: COMM_PATTERNS[2].color },
+// per-mode overlay toggles
+const TOPO_OVERLAYS: { id: keyof CommOverlays; label: string; color: string }[] = [
+  { id: 'ring', label: COMM_PATTERNS[0].label, color: COMM_PATTERNS[0].color },
+  { id: 'a2a',  label: COMM_PATTERNS[1].label, color: COMM_PATTERNS[1].color },
+];
+const NODE_OVERLAYS: { id: keyof CommOverlays; label: string; color: string }[] = [
+  { id: 'tile',  label: 'Tile 数据流', color: '#f59e0b' },
+  { id: 'cores', label: 'AI Core 阵列', color: COMM_PATTERNS[2].color },
 ];
 
 export function ClusterView() {
@@ -50,7 +57,8 @@ export function ClusterView() {
   const [nodeSlot, setNodeSlot] = useState(0);
   const [hoverInfo, setHoverInfo] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
-  const [overlays, setOverlays] = useState<CommOverlays>({ ring: false, a2a: false, thread: false });
+  const [scale, setScale] = useState<Scale>(DEFAULT_SCALE);
+  const [overlays, setOverlays] = useState<CommOverlays>({ ring: false, a2a: false, tile: true, cores: true });
 
   const spec = GENERATIONS[gen];
   const onHoverInfo = useCallback((t: string | null) => setHoverInfo(t), []);
@@ -59,7 +67,8 @@ export function ClusterView() {
   const infoKey =
     mode === 'overview' ? 'overview' :
     mode === 'rack' ? (rackKind === 'compute' ? 'computeRack' : 'switchRack') :
-    mode === 'node' ? 'node' : 'topology';
+    mode === 'node' ? 'node' :
+    mode === 'matrix' ? 'matrix' : 'topology';
   const info = INFO[infoKey];
 
   const breadcrumb = useMemo(() => {
@@ -81,6 +90,7 @@ export function ClusterView() {
     ['单卡 HBM 带宽', `${spec.memPerChipTBs} TB/s`],
     ['单卡 UB 带宽', `${spec.chipUbTBs} TB/s`],
     ['总互联带宽', `${spec.interconnectPBs} PB/s`],
+    ['小超节点', `16P / 32P / 64P(单柜) · 64 卡步长`],
     ['机柜', `${spec.totalCabs}（${spec.computeCabs} 计算 + ${spec.commCabs} 通信）`],
     ['占地', `${spec.footprintM2.toLocaleString()} m²`],
     ['训练 / 推理', `${spec.trainTokps} / ${spec.inferTokps}`],
@@ -128,10 +138,10 @@ export function ClusterView() {
             </button>
           ))}
         </div>
-        {/* process / thread comm overlay toggles (UB hierarchy view) */}
-        {mode === 'topology' && (
+        {/* per-mode overlay toggles: process(rank) in UB view, tile/cores in node view */}
+        {(mode === 'topology' || mode === 'node') && (
           <div style={{ display: 'flex', gap: 4, borderLeft: '1px solid rgba(0,0,0,0.12)', paddingLeft: 12 }}>
-            {OVERLAY_TABS.map((t) => {
+            {(mode === 'topology' ? TOPO_OVERLAYS : NODE_OVERLAYS).map((t) => {
               const on = overlays[t.id];
               return (
                 <button
@@ -150,6 +160,23 @@ export function ClusterView() {
                 </button>
               );
             })}
+          </div>
+        )}
+        {/* scale selector (adjacency-matrix view) */}
+        {mode === 'matrix' && (
+          <div style={{ display: 'flex', gap: 4, borderLeft: '1px solid rgba(0,0,0,0.12)', paddingLeft: 12 }}>
+            {(Object.keys(SCALES) as Scale[]).map((s) => (
+              <button
+                key={s}
+                onClick={() => setScale(s)}
+                style={{
+                  padding: '4px 12px', fontSize: 11.5, borderRadius: 4, cursor: 'pointer',
+                  border: `1px solid ${scale === s ? '#4369ef' : 'rgba(0,0,0,0.12)'}`,
+                  background: scale === s ? 'rgba(67,105,239,0.10)' : 'transparent',
+                  color: scale === s ? '#4369ef' : 'rgba(0,0,0,0.55)',
+                }}
+              >{SCALES[s].label}</button>
+            ))}
           </div>
         )}
         {/* breadcrumb */}
@@ -175,7 +202,7 @@ export function ClusterView() {
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
           <Canvas
-            key={`${mode}-${gen}`}
+            key={`${mode}-${gen}-${scale}`}
             camera={{ position: cam.pos, fov: 42 }}
             shadows
             dpr={[1, 2]}
@@ -199,8 +226,9 @@ export function ClusterView() {
             {mode === 'rack' && (
               <RackScene rackKind={rackKind} label={rackLabel} onHoverInfo={onHoverInfo} onSelectNode={(slot) => { setNodeSlot(slot); setMode('node'); }} />
             )}
-            {mode === 'node' && <NodeScene onHoverInfo={onHoverInfo} />}
+            {mode === 'node' && <NodeScene onHoverInfo={onHoverInfo} overlays={overlays} />}
             {mode === 'topology' && <TopologyScene gen={spec} overlays={overlays} onHoverInfo={onHoverInfo} />}
+            {mode === 'matrix' && <AdjacencyScene scale={scale} onHoverInfo={onHoverInfo} />}
 
             <OrbitControls
               target={cam.target}
@@ -237,8 +265,33 @@ export function ClusterView() {
             </div>
             {mode === 'topology' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: 4 }}>
-                <div style={{ fontSize: 10.5, fontWeight: 600, color: 'rgba(0,0,0,0.6)' }}>进程 / 线程级通信（顶栏开关）</div>
-                {COMM_PATTERNS.map((c) => (
+                <div style={{ fontSize: 10.5, fontWeight: 600, color: 'rgba(0,0,0,0.6)' }}>进程级通信（顶栏开关）</div>
+                {COMM_PATTERNS.slice(0, 2).map((c) => (
+                  <span key={c.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ width: 12, height: 3, background: c.color, display: 'inline-block', borderRadius: 1 }} />
+                    <span style={{ color: 'rgba(0,0,0,0.6)' }}>{c.label}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            {mode === 'matrix' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: 4 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 600, color: 'rgba(0,0,0,0.6)' }}>单元格</div>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 12, height: 8, background: '#3a4256', display: 'inline-block', borderRadius: 1 }} />
+                  <span style={{ color: 'rgba(0,0,0,0.6)' }}>对角（自身）</span>
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 12, height: 8, background: '#dfe3ea', display: 'inline-block', borderRadius: 1 }} />
+                  <span style={{ color: 'rgba(0,0,0,0.6)' }}>多跳（非直连）</span>
+                </span>
+                <span style={{ color: 'rgba(0,0,0,0.5)', fontSize: 10 }}>其余=按 UB 级别着色（直连）</span>
+              </div>
+            )}
+            {mode === 'node' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: 4 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 600, color: 'rgba(0,0,0,0.6)' }}>节点内（顶栏开关）</div>
+                {NODE_OVERLAYS.map((c) => (
                   <span key={c.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                     <span style={{ width: 12, height: 3, background: c.color, display: 'inline-block', borderRadius: 1 }} />
                     <span style={{ color: 'rgba(0,0,0,0.6)' }}>{c.label}</span>

@@ -13,15 +13,16 @@
  * Display text with product/brand terms is sourced from ../content (decoded at
  * runtime); this file carries no plaintext product names.
  */
-import { Suspense, useMemo, useState, type ComponentProps, type ReactNode } from 'react';
+import { Suspense, useMemo, useState, useLayoutEffect, useRef, type ComponentProps, type ReactNode } from 'react';
 import { Text as DreiText, Edges } from '@react-three/drei';
 import * as THREE from 'three';
 import {
   RACK_DIM, COMPUTE_RACK_UNITS, SWITCH_RACK_UNITS,
-  NODE_DIM, NODE_PARTS, DIES_PER_NPU, NPUS_PER_NODE,
+  NODE_DIM, NODE_PARTS, NPU_GRID, DIES_PER_NPU, NPUS_PER_NODE,
   UB_LEVELS, COMM_PATTERNS, RACK_COLORS,
   buildHall, CAB_W, CAB_H, CAB_D,
-  type RackKind, type RackUnit, type NodePart, type GenSpec, type CabinetCell,
+  SCALES, makeAdjacency,
+  type RackKind, type RackUnit, type NodePart, type GenSpec, type CabinetCell, type Scale,
 } from './data';
 import { TOK } from '../content';
 
@@ -410,10 +411,117 @@ function segGeo(segments: number[]): THREE.BufferGeometry {
   return g;
 }
 
-/** Process(rank) / thread-level comm overlays — rendered in the UB hierarchy view. */
-export interface CommOverlays { ring: boolean; a2a: boolean; thread: boolean; }
+/** Toggleable overlays. ring/a2a → UB hierarchy view; tile/cores → node view. */
+export interface CommOverlays { ring: boolean; a2a: boolean; tile: boolean; cores: boolean; }
 
-export function NodeScene({ onHoverInfo }: SceneCallbacks) {
+// ─── Node die compute-detail (AI Core array + SRAM + Tile dataflow) ──────────
+const DIE = {
+  pos: [2.7, 0.06, 0] as [number, number, number],   // inset podium beside the blade
+  w: 1.7, d: 1.1,
+  cube: { rows: 4, cols: 4 },     // Cube core array (schematic)
+  vec: { rows: 2, cols: 4 },      // Vector cores
+};
+
+/** Enlarged single-die view: HBM → L1 → L0 → Cube/Vector cores, with tile dataflow. */
+function DieDetail({ overlays, onHoverInfo }: { overlays: CommOverlays; onHoverInfo: (t: string | null) => void }) {
+  const [hx, hz] = [DIE.w / 2, DIE.d / 2];
+  const cubeColor = COMM_PATTERNS[2].color;   // thread/tile colour (cyan)
+  const tileColor = '#f59e0b';
+
+  // tile dataflow polyline: HBM → L1 → L0A/L0B → Cube → L0C → L1
+  const flowGeo = useMemo(() => {
+    const p = (x: number, z: number): [number, number, number] => [x, 0.06, z];
+    const seg: number[] = [];
+    const hbm = p(-hx + 0.18, 0), l1 = p(-hx + 0.62, 0), l0 = p(-0.1, 0), cube = p(0.55, 0), l0c = p(0.55, -hz + 0.3);
+    const chain = [hbm, l1, l0, cube, l0c, l1];
+    for (let i = 0; i < chain.length - 1; i++) seg.push(...chain[i], ...chain[i + 1]);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(seg, 3));
+    return g;
+  }, [hx, hz]);
+
+  const Block = ({ x, z, w, d, label, color }: { x: number; z: number; w: number; d: number; label: string; color: string }) => (
+    <group position={[x, 0, z]}
+      onPointerOver={(e) => { e.stopPropagation(); onHoverInfo(`${label}`); }}
+      onPointerOut={() => onHoverInfo(null)}
+    >
+      <Slab size={[w, 0.05, d]} position={[0, 0.025, 0]} color={color} metalness={0.3} roughness={0.55} edgeColor={LC.rackEdge} />
+      <Text position={[0, 0.07, 0]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.08} color={LC.text} anchorX="center" anchorY="middle">{label}</Text>
+    </group>
+  );
+
+  return (
+    <group position={DIE.pos}>
+      {/* substrate */}
+      <Slab size={[DIE.w + 0.1, 0.03, DIE.d + 0.1]} position={[0, 0, 0]} color="#eef1f6" edgeColor={LC.rackEdge} />
+      {/* HBM stack (left) */}
+      <Block x={-hx + 0.18} z={0} w={0.22} d={DIE.d * 0.8} label="HBM" color="#cdd6e4" />
+      {/* L1 SRAM */}
+      <Block x={-hx + 0.62} z={0} w={0.2} d={DIE.d * 0.7} label="L1" color="#d6e0f0" />
+      {/* L0A/L0B buffers */}
+      <Block x={-0.1} z={hz - 0.28} w={0.5} d={0.18} label="L0A/L0B" color="#dbe6f2" />
+      {/* AI Core array: Cube + Vector */}
+      {overlays.cores && (
+        <group>
+          {Array.from({ length: DIE.cube.rows * DIE.cube.cols }, (_, k) => {
+            const r = Math.floor(k / DIE.cube.cols), c = k % DIE.cube.cols;
+            return (
+              <Slab key={`cube-${k}`} size={[0.085, 0.06, 0.085]}
+                position={[0.4 + c * 0.1, 0.03, (r - 1.5) * 0.1]}
+                color={cubeColor} emissive={cubeColor} emissiveIntensity={0.5} />
+            );
+          })}
+          {Array.from({ length: DIE.vec.rows * DIE.vec.cols }, (_, k) => {
+            const r = Math.floor(k / DIE.vec.cols), c = k % DIE.vec.cols;
+            return (
+              <Slab key={`vec-${k}`} size={[0.07, 0.05, 0.07]}
+                position={[0.4 + c * 0.1, 0.03, (r - 0.5) * 0.1 + hz - 0.22]}
+                color="#7dd3fc" emissive="#7dd3fc" emissiveIntensity={0.35} />
+            );
+          })}
+          <Text position={[0.62, 0.12, 0]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.075} color={cubeColor} anchorX="center">Cube ×16</Text>
+        </group>
+      )}
+      {/* L0C accumulator */}
+      <Block x={0.55} z={-hz + 0.3} w={0.5} d={0.18} label="L0C" color="#dbe6f2" />
+      {/* tile dataflow */}
+      {overlays.tile && (
+        <group
+          onPointerOver={(e) => { e.stopPropagation(); onHoverInfo(`Tile 数据流：HBM→L1→L0→Cube→L0C 异步流水（TileShape 切分 · 参考 TileLang/${TOK.pypto}）`); }}
+          onPointerOut={() => onHoverInfo(null)}
+        >
+          <lineSegments geometry={flowGeo}><lineBasicMaterial color={tileColor} transparent opacity={0.9} /></lineSegments>
+        </group>
+      )}
+      <Text position={[0, 0.05, hz + 0.18]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.1} color={LC.textDim} anchorX="center">
+        {`单 die 算子视图 · AI Core + 多级 SRAM · 线程/Tile 级`}
+      </Text>
+    </group>
+  );
+}
+
+/** Node-internal UB 2D-mesh among the 8 NPUs (L1 board fabric). */
+function BoardMesh() {
+  const S = S_NODE;
+  const geo = useMemo(() => {
+    const npu = NODE_PARTS.filter((p) => p.type === 'npu');
+    const pos = (i: number): [number, number, number] => [npu[i].pos[0] * S, 0.05 * S, npu[i].pos[2] * S];
+    const seg: number[] = [];
+    for (let r = 0; r < NPU_GRID.rows; r++)
+      for (let c = 0; c < NPU_GRID.cols; c++) {
+        const i = r * NPU_GRID.cols + c;
+        if (i >= npu.length) continue;
+        if (c + 1 < NPU_GRID.cols) seg.push(...pos(i), ...pos(i + 1));
+        if (r + 1 < NPU_GRID.rows && i + NPU_GRID.cols < npu.length) seg.push(...pos(i), ...pos(i + NPU_GRID.cols));
+      }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(seg, 3));
+    return g;
+  }, []);
+  return <lineSegments geometry={geo}><lineBasicMaterial color={L(1)} transparent opacity={0.7} /></lineSegments>;
+}
+
+export function NodeScene({ onHoverInfo, overlays }: SceneCallbacks & { overlays: CommOverlays }) {
   const [hoverId, setHoverId] = useState<string | null>(null);
   const S = S_NODE;
   const w = NODE_DIM.w * S, h = NODE_DIM.h * S, d = NODE_DIM.d * S;
@@ -450,7 +558,11 @@ export function NodeScene({ onHoverInfo }: SceneCallbacks) {
             }}
           />
         ))}
+        {/* node-internal UB 2D-mesh (L1 board fabric) */}
+        <BoardMesh />
       </group>
+      {/* enlarged single-die compute detail (AI Core + SRAM + Tile dataflow) */}
+      <DieDetail overlays={overlays} onHoverInfo={onHoverInfo} />
     </group>
   );
 }
@@ -488,18 +600,6 @@ export function TopologyScene({ gen, overlays, onHoverInfo }: SceneCallbacks & {
     const seg: number[] = [];
     const y = HT.y[1] + 0.18;
     for (let i = 0; i < 8; i++) for (let j = i + 1; j < 8; j++) seg.push(rankX(i), y, -0.16, rankX(j), y, -0.16);
-    return segGeo(seg);
-  }, []);
-
-  const threadGeo = useMemo(() => {
-    const seg: number[] = [];
-    // per die at L0: small fan of AI-core / thread lines rising from the die
-    for (let i = 0; i < 8; i++) {
-      for (let d = 0; d < DIES_PER_NPU; d++) {
-        const x = dieX(i) + (d - (DIES_PER_NPU - 1) / 2) * 0.11;
-        for (let t = -2; t <= 2; t++) seg.push(x, HT.y[0] + 0.05, 0, x + t * 0.02, HT.y[0] + 0.32, 0.05 * (t % 2));
-      }
-    }
     return segGeo(seg);
   }, []);
 
@@ -604,16 +704,7 @@ export function TopologyScene({ gen, overlays, onHoverInfo }: SceneCallbacks & {
         </mesh>
       ))}
 
-      {/* ── process(rank) / thread comm overlays (toggled in toolbar) ── */}
-      {overlays.thread && (
-        <group
-          onPointerOver={(e) => { e.stopPropagation(); onHoverInfo(`线程级：die 内 AI Core / 线程并行计算流（L0 片内）`); }}
-          onPointerOut={() => onHoverInfo(null)}
-        >
-          <lineSegments geometry={threadGeo}><lineBasicMaterial color={COMM_PATTERNS[2].color} transparent opacity={0.8} /></lineSegments>
-          <Text position={[dieX(7) + 0.5, HT.y[0] + 0.3, 0]} fontSize={0.14} color={COMM_PATTERNS[2].color} anchorX="left">{COMM_PATTERNS[2].label}</Text>
-        </group>
-      )}
+      {/* ── process(rank) comm overlays (toggled in toolbar) ── */}
       {overlays.a2a && (
         <group
           onPointerOver={(e) => { e.stopPropagation(); onHoverInfo(`进程级 All-to-All（MoE 专家并行）：rank 间全互联，经 L1/L2 UB 直连 + L3 Clos`); }}
@@ -634,8 +725,104 @@ export function TopologyScene({ gen, overlays, onHoverInfo }: SceneCallbacks & {
       )}
 
       <Text position={[0, 0.04, 2.4]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.2} color={LC.textDim} anchorX="center">
-        {`${TOK.ubmesh} 互联层级 · ${gen.code} ${gen.name} · 悬停查看各级带宽 · 顶栏开关叠加进程/线程级通信`}
+        {`${TOK.ubmesh} 互联层级 · ${gen.code} ${gen.name} · 悬停查看各级带宽 · 顶栏开关叠加进程级通信`}
       </Text>
+    </group>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 5. UB adjacency matrix (NPU × NPU, recursive full-mesh)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ADJ_SPAN = 6;   // matrix footprint in world units
+
+export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale: Scale }) {
+  const dims = SCALES[scale].dims;
+  const { n, cell } = useMemo(() => makeAdjacency(dims), [dims]);
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const [hover, setHover] = useState<number | null>(null);
+
+  const cellSize = ADJ_SPAN / n;
+  const pos = (k: number) => -ADJ_SPAN / 2 + cellSize * (k + 0.5);
+
+  // per-instance colour by connection level
+  useLayoutEffect(() => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    const m = new THREE.Matrix4();
+    const col = new THREE.Color();
+    const cSelf = new THREE.Color('#3a4256');
+    const cIndirect = new THREE.Color('#dfe3ea');
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const idx = i * n + j;
+        // group is rotated -90° about X, so cells live in local XY (→ world XZ)
+        m.makeScale(cellSize * 0.92, cellSize * 0.92, 1);
+        m.setPosition(pos(j), pos(i), 0);
+        mesh.setMatrixAt(idx, m);
+        const a = cell(i, j);
+        if (a.hops === 0) col.copy(cSelf);
+        else if (a.direct) col.set(L(a.level));
+        else { col.copy(cIndirect); }
+        mesh.setColorAt(idx, col);
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }, [n, cell, cellSize]);
+
+  return (
+    <group>
+      <Floor size={14} />
+      {/* matrix plane */}
+      <group position={[0, 0.3, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <instancedMesh
+          ref={ref}
+          args={[undefined, undefined, n * n]}
+          onPointerMove={(e) => {
+            e.stopPropagation();
+            const id = e.instanceId;
+            if (id === undefined) return;
+            setHover(id);
+            const i = Math.floor(id / n), j = id % n;
+            const a = cell(i, j);
+            const desc = a.hops === 0 ? '对角（自身）'
+              : a.direct ? `直连 · ${UB_LEVELS[a.level].id} ${UB_LEVELS[a.level].label}`
+              : `多跳 ×${a.hops}（经 ${UB_LEVELS[a.level].id}）`;
+            onHoverInfo(`NPU ${i} ↔ NPU ${j}：${desc}`);
+          }}
+          onPointerOut={() => { setHover(null); onHoverInfo(null); }}
+        >
+          <planeGeometry args={[1, 1]} />
+          <meshBasicMaterial toneMapped={false} />
+        </instancedMesh>
+        {/* highlight hovered row+col guide */}
+        {hover !== null && (() => {
+          const i = Math.floor(hover / n), j = hover % n;
+          return (
+            <group>
+              <mesh position={[0, pos(i), 0.01]}><planeGeometry args={[ADJ_SPAN, cellSize]} /><meshBasicMaterial color="#4369ef" transparent opacity={0.12} /></mesh>
+              <mesh position={[pos(j), 0, 0.01]}><planeGeometry args={[cellSize, ADJ_SPAN]} /><meshBasicMaterial color="#4369ef" transparent opacity={0.12} /></mesh>
+            </group>
+          );
+        })()}
+      </group>
+      {/* board boundary grid lines (every 8 NPU = one board) */}
+      {Array.from({ length: dims[1] + 1 }, (_, b) => {
+        const o = -ADJ_SPAN / 2 + (ADJ_SPAN / dims[1]) * b;
+        return (
+          <group key={b}>
+            <Slab size={[ADJ_SPAN, 0.32, 0.012]} position={[0, 0.16, o]} color={LC.rackEdge} opacity={0.25} />
+            <Slab size={[0.012, 0.32, ADJ_SPAN]} position={[o, 0.16, 0]} color={LC.rackEdge} opacity={0.25} />
+          </group>
+        );
+      })}
+      <Text position={[0, 0.02, ADJ_SPAN / 2 + 0.55]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.26} color={LC.textDim} anchorX="center">
+        {`${SCALES[scale].label} · ${n}×${n} NPU UB 邻接矩阵 · ${dims.join('×')} ${TOK.fullmesh} · 颜色=互联级别`}
+      </Text>
+      <Text position={[-ADJ_SPAN / 2 - 0.35, 0.02, 0]} rotation={[-Math.PI / 2, 0, Math.PI / 2]} fontSize={0.2} color={LC.textDim} anchorX="center">NPU i</Text>
+      <Text position={[0, 0.02, -ADJ_SPAN / 2 - 0.35]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.2} color={LC.textDim} anchorX="center">NPU j</Text>
     </group>
   );
 }
