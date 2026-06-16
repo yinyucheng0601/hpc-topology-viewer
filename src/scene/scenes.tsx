@@ -14,6 +14,7 @@
  * runtime); this file carries no plaintext product names.
  */
 import { Suspense, useEffect, useMemo, useState, useLayoutEffect, useRef, type ComponentProps, type ReactNode } from 'react';
+import { useFrame } from '@react-three/fiber';
 import { Text as DreiText, Edges, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import {
@@ -1023,6 +1024,19 @@ function LinkTube({ a, b, color, r = 0.025 }: { a: [number, number, number]; b: 
   );
 }
 
+/** Animated dashed line — dashes flow along the path (collective-comm direction). */
+function FlowLine({ points, color, width = 2.5, speed = 1, opacity = 0.95 }: {
+  points: [number, number, number][]; color: string; width?: number; speed?: number; opacity?: number;
+}) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ref = useRef<any>(null);
+  useFrame((_, dt) => { const m = ref.current?.material; if (m) m.dashOffset -= dt * speed; });
+  return (
+    <Line ref={ref} points={points} color={color} lineWidth={width} transparent opacity={opacity}
+      dashed dashSize={0.32} gapSize={0.22} />
+  );
+}
+
 const MAT_SPAN = 3.8;       // upright matrix footprint
 const MAT_POS: [number, number, number] = [-3.7, 2.2, 0];
 const MODEL_POS: [number, number, number] = [3.3, 0.5, 0];
@@ -1706,8 +1720,8 @@ export function FullPodScene({ scale, podCount, overlays, tick, onHoverInfo, onP
         <sphereGeometry args={[1, 8, 8]} /><meshStandardMaterial metalness={0.2} roughness={0.5} toneMapped={false} />
       </instancedMesh>
 
-      {overlays.ring && <Line points={G.ring} color={COMM_PATTERNS[0].color} lineWidth={commNow ? 3.5 : 2.2} transparent opacity={0.9} />}
-      {overlays.a2a && <Line points={G.a2a} segments color={COMM_PATTERNS[1].color} lineWidth={1} transparent opacity={commNow ? 0.4 : 0.22} />}
+      {overlays.ring && <FlowLine points={G.ring} color={COMM_PATTERNS[0].color} width={commNow ? 3.6 : 2.4} speed={commNow ? 3 : 1.2} />}
+      {overlays.a2a && <Line points={G.a2a} segments color={COMM_PATTERNS[1].color} lineWidth={1} transparent opacity={commNow ? 0.45 : 0.2} />}
 
       <Text position={[0, 0.02, G.pods[G.pods.length - 1].cab.z1 + 0.9]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.22} color={LC.textDim} anchorX="center">
         {`${SCALES[scale].label} × ${podCount} ${TOK.supernode} · ${G.N} NPU / ${G.N} 进程 · 蓝L1·紫L2·橙L3→交换·绿L4 超节点间`}
