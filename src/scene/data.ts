@@ -120,11 +120,11 @@ export interface RunPhase {
 // TP = within a blade (8 NPU, L1) · PP = blades within a replica (L2/L3) ·
 // DP = replicas across the super-node (L3/L4) · EP = experts per cabinet (L2/L3).
 export type PartitionDim = 'none' | 'tp' | 'pp' | 'dp' | 'ep';
-export const PARTITION_META: Record<Exclude<PartitionDim, 'none'>, { label: string; level: string }> = {
-  tp: { label: 'TP 张量并行', level: 'L1 节点内（8 卡）' },
-  pp: { label: 'PP 流水并行', level: 'L2/L3 跨刀片·跨柜' },
-  dp: { label: 'DP 数据并行', level: 'L3/L4 副本间（梯度 AllReduce）' },
-  ep: { label: 'EP 专家并行', level: 'L2/L3 机柜内（MoE All-to-All）' },
+export const PARTITION_META: Record<Exclude<PartitionDim, 'none'>, { label: string; level: string; comm: string; same: string }> = {
+  tp: { label: 'TP 张量并行', level: 'L1 节点内（8 卡/节点）', comm: 'AllGather / ReduceScatter', same: '同色 = 同一张量切片（tp rank 0–7，每节点复现）' },
+  pp: { label: 'PP 流水并行', level: 'L2/L3 跨刀片 · 跨柜',   comm: '阶段间 P2P 激活传递',        same: '同色 = 同一流水级（承载相同层）' },
+  dp: { label: 'DP 数据并行', level: 'L3/L4 副本间',          comm: '梯度 AllReduce',            same: '同色 = 同一数据副本' },
+  ep: { label: 'EP 专家并行', level: 'L2/L3 机柜内',          comm: 'token All-to-All',         same: '同色 = 同一专家组（All-to-All 域）' },
 };
 // cycling palette: group g → PARTITION_PALETTE[g % len] (same colour = same parallel group)
 export const PARTITION_PALETTE = ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899', '#10b981', '#f97316', '#06b6d4', '#a855f7'];

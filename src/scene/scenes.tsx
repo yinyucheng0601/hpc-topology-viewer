@@ -1739,10 +1739,10 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
       const b = Math.floor(k / FP_CARDS_PER_BLADE);   // global blade index = TP group
       const lb = b % nB1;                             // blade within its super-node
       switch (partition) {
-        case 'tp': return b;                          // 8 cards of a blade are tensor-parallel
+        case 'tp': return k % FP_CARDS_PER_BLADE;     // tensor slice (tp rank 0–7) within the node
         case 'pp': return lb % PP;                    // pipeline stage within a model replica
         case 'dp': return Math.floor(lb / PP);        // data-parallel replica
-        case 'ep': return G.bladeCab[b];              // experts grouped per cabinet
+        case 'ep': return G.bladeCab[b];              // experts grouped per cabinet (All-to-All domain)
         default:   return 0;
       }
     };
@@ -1772,11 +1772,13 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
     const cardBase = chipTex ? '#ffffff' : LC.npuTop;
     const pm = procRef.current, tm = thrRef.current, nm = cardInst.current;
     const onPart = partition !== 'none';
-    if (pm) { for (let k = 0; k < G.N; k++) { col.copy(procBase); if (commNow && tint) col.lerp(tint, 0.7); pm.setColorAt(k, col); } if (pm.instanceColor) pm.instanceColor.needsUpdate = true; }
-    if (tm) { for (let k = 0; k < G.N * FP_THREADS; k++) { col.copy(thrBase); if (computeNow && tint) col.lerp(tint, 0.7); tm.setColorAt(k, col); } if (tm.instanceColor) tm.instanceColor.needsUpdate = true; }
-    if (nm && !useChip) { for (let k = 0; k < G.N; k++) { if (k === lastHov.current) continue; if (onPart) col.set(PARTITION_PALETTE[part.groupOf(k) % PARTITION_PALETTE.length]); else { col.set(cardBase); if (computeNow && tint) col.lerp(tint, 0.34); } nm.setColorAt(k, col); } if (nm.instanceColor) nm.instanceColor.needsUpdate = true; }
-    const bm = bladeInst.current;
-    if (bm) { for (let b = 0; b < G.nBlades; b++) { if (onPart) col.set(PARTITION_PALETTE[part.groupOf(b * FP_CARDS_PER_BLADE) % PARTITION_PALETTE.length]); else col.set('#dbe9fb'); bm.setColorAt(b, col); } if (bm.instanceColor) bm.instanceColor.needsUpdate = true; }
+    const pcol = (g: number) => PARTITION_PALETTE[g % PARTITION_PALETTE.length];
+    // when a partition is on, card + its rank(process) + its compute slices(threads) all carry the group colour
+    if (pm) { for (let k = 0; k < G.N; k++) { if (onPart) col.set(pcol(part.groupOf(k))); else { col.copy(procBase); if (commNow && tint) col.lerp(tint, 0.7); } pm.setColorAt(k, col); } if (pm.instanceColor) pm.instanceColor.needsUpdate = true; }
+    if (tm) { for (let i = 0; i < G.N * FP_THREADS; i++) { if (onPart) col.set(pcol(part.groupOf(Math.floor(i / FP_THREADS)))); else { col.copy(thrBase); if (computeNow && tint) col.lerp(tint, 0.7); } tm.setColorAt(i, col); } if (tm.instanceColor) tm.instanceColor.needsUpdate = true; }
+    if (nm && !useChip) { for (let k = 0; k < G.N; k++) { if (k === lastHov.current) continue; if (onPart) col.set(pcol(part.groupOf(k))); else { col.set(cardBase); if (computeNow && tint) col.lerp(tint, 0.34); } nm.setColorAt(k, col); } if (nm.instanceColor) nm.instanceColor.needsUpdate = true; }
+    const bm = bladeInst.current;   // TP is sub-node → blade markers stay neutral for TP; PP/DP/EP carry the group
+    if (bm) { for (let b = 0; b < G.nBlades; b++) { if (onPart && partition !== 'tp') col.set(pcol(part.groupOf(b * FP_CARDS_PER_BLADE))); else col.set('#dbe9fb'); bm.setColorAt(b, col); } if (bm.instanceColor) bm.instanceColor.needsUpdate = true; }
   }, [G, phase, computeNow, commNow, useChip, chipTex, partition, part]);
 
   // imperative single-instance hover for the instanced-card path (avoids 8 K-loop per move)

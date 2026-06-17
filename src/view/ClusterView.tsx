@@ -694,10 +694,12 @@ export function ClusterView() {
                   <>
                     <div style={lgHdr}>{`并行切分 · ${PARTITION_META[fpPart].label}`}</div>
                     <span style={lgNote}>{`${PARTITION_META[fpPart].level} · ${fpCfg}`}</span>
+                    <span style={lgNote}>{`通信：${PARTITION_META[fpPart].comm}`}</span>
                     <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap', marginTop: 2 }}>
                       {PARTITION_PALETTE.map((c, i) => <span key={i} title={`组 ${i}`} style={{ width: 14, height: 9, background: c, borderRadius: 1, display: 'inline-block' }} />)}
                     </div>
-                    <span style={lgNote}>{`同色 = 同一 ${fpPart.toUpperCase()} 组（按组循环上色）`}</span>
+                    <span style={lgNote}>{PARTITION_META[fpPart].same}</span>
+                    <span style={lgNote}>卡 / 进程 rank / 线程切片 同步上色</span>
                   </>
                 )}
               </>
