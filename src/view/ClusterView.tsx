@@ -128,9 +128,9 @@ export function ClusterView() {
 
   // full-pod field grows with the card count → pull the camera back / raise the angle to fit
   const fpReach = useMemo(() => {
-    const n = (fpFull ? spec.totalNpus : SCALES[scale].npus) * podCount;
+    const n = (fpFull ? spec.totalNpus : 64) * podCount;   // full super-node, else single 64P cabinet
     return Math.sqrt(n) * 1.3 + 12;
-  }, [fpFull, scale, podCount, spec.totalNpus]);
+  }, [fpFull, podCount, spec.totalNpus]);
   const cam = mode === 'node' && nodeKind === 'ubswitch'
     ? { pos: [2.9, 2.5, 3.6] as [number, number, number], target: [0, 0.7, 0] as [number, number, number] }
     : mode === 'fullpod'
@@ -219,8 +219,8 @@ export function ClusterView() {
             })}
           </div>
         )}
-        {/* scale selector (adjacency-matrix + full-pod views) */}
-        {(mode === 'matrix' || mode === 'fullpod') && (
+        {/* scale selector (adjacency-matrix view) */}
+        {mode === 'matrix' && (
           <div style={{ display: 'flex', gap: 4, borderLeft: '1px solid rgba(0,0,0,0.12)', paddingLeft: 12 }}>
             {(Object.keys(SCALES) as Scale[]).map((s) => (
               <button
@@ -233,6 +233,24 @@ export function ClusterView() {
                   color: scale === s ? '#4369ef' : 'rgba(0,0,0,0.55)',
                 }}
               >{SCALES[s].label}</button>
+            ))}
+          </div>
+        )}
+        {/* full-pod scale — only two, side by side: 64P single cabinet ↔ full super-node */}
+        {mode === 'fullpod' && (
+          <div style={{ display: 'flex', gap: 4, borderLeft: '1px solid rgba(0,0,0,0.12)', paddingLeft: 12 }}>
+            {([[false, '64P 单柜'], [true, `全量超节点(${spec.totalNpus >= 1000 ? Math.round(spec.totalNpus / 1000) + 'K' : spec.totalNpus})`]] as [boolean, string][]).map(([v, label]) => (
+              <button
+                key={label}
+                onClick={() => setFpFull(v)}
+                title={v ? `渲染整座超节点全部 ${spec.totalNpus.toLocaleString()} 张卡（阵列）` : '单柜 64 卡（8 刀片 × 8 卡）'}
+                style={{
+                  padding: '4px 12px', fontSize: 11.5, borderRadius: 4, cursor: 'pointer',
+                  border: `1px solid ${fpFull === v ? '#4369ef' : 'rgba(0,0,0,0.12)'}`,
+                  background: fpFull === v ? 'rgba(67,105,239,0.10)' : 'transparent',
+                  color: fpFull === v ? '#4369ef' : 'rgba(0,0,0,0.55)',
+                }}
+              >{label}</button>
             ))}
           </div>
         )}
@@ -252,21 +270,6 @@ export function ClusterView() {
                 }}
               >{`×${c}`}</button>
             ))}
-          </div>
-        )}
-        {/* full-pod: render the entire super-node (gen.totalNpus) as a 2-D array */}
-        {mode === 'fullpod' && (
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center', borderLeft: '1px solid rgba(0,0,0,0.12)', paddingLeft: 12 }}>
-            <button
-              onClick={() => setFpFull((v) => !v)}
-              title={`全量超节点：渲染整座超节点全部 ${spec.totalNpus.toLocaleString()} 张卡（阵列）`}
-              style={{
-                padding: '4px 12px', fontSize: 11.5, borderRadius: 4, cursor: 'pointer',
-                border: `1px solid ${fpFull ? '#4369ef' : 'rgba(0,0,0,0.12)'}`,
-                background: fpFull ? 'rgba(67,105,239,0.10)' : 'transparent',
-                color: fpFull ? '#4369ef' : 'rgba(0,0,0,0.55)',
-              }}
-            >{`全量超节点(${spec.totalNpus >= 1000 ? Math.round(spec.totalNpus / 1000) + 'K' : spec.totalNpus})`}</button>
           </div>
         )}
         {/* breadcrumb */}
@@ -331,7 +334,7 @@ export function ClusterView() {
             {mode === 'matrix' && <AdjacencyScene scale={scale} onHoverInfo={onHoverInfo} />}
             {mode === 'mapping' && <MappingScene onHoverInfo={onHoverInfo} />}
             {mode === 'trace' && <TraceScene onHoverInfo={onHoverInfo} onLocate={setLocate} tick={traceTick} />}
-            {mode === 'fullpod' && <FullPodScene scale={scale} podCount={podCount} full={fpFull} gen={spec} overlays={overlays} tick={traceTick} onHoverInfo={onHoverInfo} onPick={(loc) => { setRackKind('compute'); setNodeKind('compute'); setPendingNpu(loc); setMode('node'); }} />}
+            {mode === 'fullpod' && <FullPodScene scale="64P" podCount={podCount} full={fpFull} gen={spec} overlays={overlays} tick={traceTick} onHoverInfo={onHoverInfo} onPick={(loc) => { setRackKind('compute'); setNodeKind('compute'); setPendingNpu(loc); setMode('node'); }} />}
 
             <OrbitControls
               ref={controlsRef}

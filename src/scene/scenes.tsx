@@ -1618,6 +1618,7 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, tick, onHov
   scale: Scale; podCount: number; full: boolean; gen: GenSpec; overlays: CommOverlays; tick: number | null; onPick?: (npuLocal: number) => void;
 }) {
   const [hoverNpu, setHoverNpu] = useState<number | null>(null);
+  const [selCard, setSelCard] = useState<number | null>(null);   // single-click selection → highlight its up/down-stream chain
   const [focus, setFocus] = useState<number | null>(null);   // focused band index → highlight its downstream link
   const lastHov = useRef(-1);
   const cardInst = useRef<THREE.InstancedMesh>(null);
@@ -1703,7 +1704,7 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, tick, onHov
 
     return {
       N, N1, nBlades: bladeMX.length, nCabs: cabMX.length, superMX, cluster: [0, yCluster, 0] as [number, number, number],
-      cardX, cardZ, bladeMX, bladeMZ, cabMX, cabMZ, thrPitch, drawMicro,
+      cardX, cardZ, cardBlade, bladeMX, bladeMZ, bladeCab, cabMX, cabMZ, cabSuper, thrPitch, drawMicro,
       yThread, yProc, yCard, yBlade, yCab, ySuper, yCluster,
       t2p, p2c, c2b, b2c, c2s, s2cl, ring, a2a, fieldW, fieldD: superD, superW, cw, cd,
     };
@@ -1746,6 +1747,26 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, tick, onHov
     lastHov.current = k ?? -1;
     nm.instanceMatrix.needsUpdate = true; if (nm.instanceColor) nm.instanceColor.needsUpdate = true;
   };
+
+  const toggleSel = (k: number) => setSelCard((s) => (s === k ? null : k));   // single-click select
+  useEffect(() => { setSelCard(null); }, [G]);   // drop stale selection when the layout changes
+
+  // trace the selected card's up/down-stream chain (thread → process → card → blade → cabinet → super-node)
+  const selPath = useMemo(() => {
+    if (selCard === null || selCard >= G.N) return null;
+    const k = selCard, x = G.cardX[k], z = G.cardZ[k];
+    const b = G.cardBlade[k], c = G.bladeCab[b], p = G.cabSuper[c];
+    const card: [number, number, number] = [x, G.yCard, z];
+    const proc: [number, number, number] = [x, G.yProc, z];
+    const blade: [number, number, number] = [G.bladeMX[b], G.yBlade, G.bladeMZ[b]];
+    const cab: [number, number, number] = [G.cabMX[c], G.yCab, G.cabMZ[c]];
+    const sup: [number, number, number] = [G.superMX[p], G.ySuper, 0];
+    const segs: [number, number, number][] = [];
+    for (let t = 0; t < FP_THREADS; t++) segs.push([x + (t - (FP_THREADS - 1) / 2) * G.thrPitch, G.yThread, z], proc);
+    segs.push(proc, card, card, blade, blade, cab, cab, sup);
+    if (podCount > 1) segs.push(sup, G.cluster);
+    return { segs, card, blade, cab, sup };
+  }, [selCard, G, podCount]);
 
   // connector with downstream-focus emphasis (focus = upper band index)
   const conn = (pts: [number, number, number][], color: string, upper: number, base = 1.2) => pts.length > 0 && (
@@ -1798,21 +1819,34 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, tick, onHov
       {useChip
         ? G.cardX.map((x, k) => (
           <group key={k} position={[x, G.yCard, G.cardZ[k]]}
-            onPointerOver={(e) => { e.stopPropagation(); if (k === lastHov.current) return; lastHov.current = k; setHoverNpu(k); setCursor(true); onHoverInfo(`NPU ${k} · ${TOK.supernode} P${podOf(k)} · rank ${k} · 点击下钻`); }}
+            onPointerOver={(e) => { e.stopPropagation(); if (k === lastHov.current) return; lastHov.current = k; setHoverNpu(k); setCursor(true); onHoverInfo(`NPU ${k} · ${TOK.supernode} P${podOf(k)} · rank ${k} · 单击高亮上下游 · 双击进入节点`); }}
             onPointerOut={() => { lastHov.current = -1; setHoverNpu(null); setCursor(false); onHoverInfo(null); }}
-            onClick={(e) => { e.stopPropagation(); onPick?.(k % 8); }}>
-            <NpuChip w={0.34} h={0.18} hovered={hoverNpu === k} selected={hoverNpu === k} logo />
+            onClick={(e) => { e.stopPropagation(); toggleSel(k); }}
+            onDoubleClick={(e) => { e.stopPropagation(); onPick?.(k % 8); }}>
+            <NpuChip w={0.34} h={0.18} hovered={hoverNpu === k} selected={hoverNpu === k || selCard === k} logo />
           </group>
         ))
         : (
           <instancedMesh ref={cardInst} args={[undefined, undefined, Math.max(1, G.N)]}
-            onPointerMove={(e) => { e.stopPropagation(); const k = e.instanceId; if (k === undefined || k === lastHov.current) return; hoverCard(k); setHoverNpu(k); onHoverInfo(`NPU ${k} · ${TOK.supernode} P${podOf(k)} · rank ${k} · 点击下钻`); }}
+            onPointerMove={(e) => { e.stopPropagation(); const k = e.instanceId; if (k === undefined || k === lastHov.current) return; hoverCard(k); setHoverNpu(k); onHoverInfo(`NPU ${k} · ${TOK.supernode} P${podOf(k)} · rank ${k} · 单击高亮上下游 · 双击进入节点`); }}
             onPointerOut={() => { hoverCard(null); setHoverNpu(null); setCursor(false); onHoverInfo(null); }}
-            onClick={(e) => { e.stopPropagation(); if (e.instanceId !== undefined) onPick?.(e.instanceId % 8); }}>
+            onClick={(e) => { e.stopPropagation(); if (e.instanceId !== undefined) toggleSel(e.instanceId); }}
+            onDoubleClick={(e) => { e.stopPropagation(); if (e.instanceId !== undefined) onPick?.(e.instanceId % 8); }}>
             <boxGeometry args={[1, 1, 1]} />
             <meshStandardMaterial map={chipTex ?? undefined} color={chipTex ? '#ffffff' : LC.npuTop} metalness={0.45} roughness={0.4} toneMapped={false} />
           </instancedMesh>
         )}
+
+      {/* selected card → highlight its full up/down-stream chain */}
+      {selPath && (
+        <group>
+          <Line points={selPath.segs} segments color="#ffb020" lineWidth={3.4} transparent opacity={0.98} />
+          {[selPath.blade, selPath.cab, selPath.sup].map((p, i) => (
+            <mesh key={i} position={p}><sphereGeometry args={[0.16, 12, 12]} /><meshStandardMaterial color="#ffb020" emissive="#ffb020" emissiveIntensity={0.7} toneMapped={false} /></mesh>
+          ))}
+          <mesh position={selPath.card}><boxGeometry args={[0.5, 0.18, 0.5]} /><meshBasicMaterial color="#ffb020" wireframe transparent opacity={0.95} /></mesh>
+        </group>
+      )}
 
       {/* process + thread (instanced, shared colours) */}
       <instancedMesh ref={procRef} args={[undefined, undefined, Math.max(1, G.N)]}>
@@ -1827,7 +1861,7 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, tick, onHov
       {overlays.a2a && G.a2a.length > 0 && <Line points={G.a2a} segments color={COMM_PATTERNS[1].color} lineWidth={1} transparent opacity={commNow ? 0.45 : 0.2} />}
 
       <Text position={[0, 0.04, G.fieldD / 2 + 1.4]} rotation={[-Math.PI / 2, 0, 0]} fontSize={Math.min(0.6, 0.2 + G.fieldW * 0.003)} color={LC.textDim} anchorX="center">
-        {`${full ? `全量${TOK.supernode}` : SCALES[scale].label} × ${podCount} · ${G.N.toLocaleString()} NPU · ${G.nBlades.toLocaleString()} 刀片 · ${G.nCabs.toLocaleString()} 机柜 · 阵列全量${G.drawMicro ? '' : '（线程/进程连线已抽样）'} · ▶播放`}
+        {`${full ? `全量${TOK.supernode}` : SCALES[scale].label} × ${podCount} · ${G.N.toLocaleString()} NPU · ${G.nBlades.toLocaleString()} 刀片 · ${G.nCabs.toLocaleString()} 机柜 · 单击卡高亮上下游 · 双击进入节点${G.drawMicro ? '' : ' · 线程/进程连线已抽样'} · ▶播放`}
       </Text>
     </group>
   );
