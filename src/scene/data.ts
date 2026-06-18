@@ -82,15 +82,15 @@ export const UB_LEVELS: UbLevel[] = [
   { id: 'L0', color: '#2dd4bf', label: '片内 die',                  detail: '封装内 die 间 UB / SIO 直连' },
   { id: 'L1', color: '#38bdf8', label: '节点内',                    detail: '板载 UB 2D-Mesh，NPU 直连' },
   { id: 'L2', color: '#a78bfa', label: `机柜内 ${TOK.fullmesh}`,    detail: `跨节点 ${TOK.fullmesh} 总线级直连` },
-  { id: 'L3', color: '#fb923c', label: `${TOK.supernode} Clos`,     detail: `经 UB 交换(通信柜) Clos 全互联` },
-  { id: 'L4', color: '#4ade80', label: `${TOK.supernode}间`,        detail: `${TOK.supercluster} scale-out（全光）` },
+  { id: 'L3', color: '#ffaa3b', label: `${TOK.supernode} Clos`,     detail: `经 UB 交换(通信柜) Clos 全互联` },
+  { id: 'L4', color: '#04d793', label: `${TOK.supernode}间`,        detail: `${TOK.supercluster} scale-out（全光）` },
 ];
 
 // ─── Process / thread communication overlays (node view) ─────────────────────
 export interface CommPattern { id: string; color: string; label: string; }
 export const COMM_PATTERNS: CommPattern[] = [
-  { id: 'ring',   color: '#f43f5e', label: 'Ring AllReduce · 进程(rank)' },
-  { id: 'a2a',    color: '#f59e0b', label: 'All-to-All MoE · 进程(rank)' },
+  { id: 'ring',   color: '#ff4b7b', label: 'Ring AllReduce · 进程(rank)' },
+  { id: 'a2a',    color: '#ffaa3b', label: 'All-to-All MoE · 进程(rank)' },
   { id: 'thread', color: '#22d3ee', label: 'die 内线程 / AI Core 流' },
 ];
 
@@ -100,7 +100,7 @@ export const TRACE_SCHED: Phase[] = ['load', 'compute', 'compute', 'comm', 'comp
 export const PHASE_META: Record<Phase, { name: string; color: string }> = {
   load:    { name: '加载',           color: '#c2c9d4' },
   compute: { name: '计算（算子/Tile）', color: '#22d3ee' },
-  comm:    { name: '通信 AllReduce',  color: '#f43f5e' },
+  comm:    { name: '通信 AllReduce',  color: '#ff4b7b' },
   store:   { name: '存储',           color: '#aab4c4' },
 };
 
@@ -134,7 +134,7 @@ export const PARTITION_PALETTE = ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#
 // (intra-node L1 fattest → scale-out L4 thinnest) with a flow surge on the active
 // collective. Status colour takes priority over the partition colour.
 export const STATUS_COLORS: Record<string, string> = {
-  compute: '#22c55e', comm: '#f43f5e', mem: '#a78bfa', load: '#60a5fa', store: '#94a3b8', idle: '#cbd5e1',
+  compute: '#04d793', comm: '#ff4b7b', mem: '#a78bfa', load: '#60a5fa', store: '#94a3b8', idle: '#9aa6b8',
 };
 export const STATUS_META: { id: string; label: string }[] = [
   { id: 'compute', label: '计算中' }, { id: 'comm', label: '通信中' }, { id: 'mem', label: '访存' },
@@ -146,7 +146,7 @@ export const RUN_SCHED: Record<RunMode, RunPhase[]> = {
     { id: 'load', name: '加载 batch',      kind: 'load',    color: '#c2c9d4', parallel: 'DP',    note: '各 DP 副本读入各自 micro-batch' },
     { id: 'fwd',  name: '前向 Forward',    kind: 'compute', color: '#22d3ee', parallel: 'TP·PP', note: 'TP 层内并行 + PP 流水级逐级前向' },
     { id: 'bwd',  name: '反向 Backward',   kind: 'compute', color: '#0ea5e9', parallel: 'TP·PP', note: '反向传播逐级回传，产生梯度' },
-    { id: 'ar',   name: '梯度 AllReduce',  kind: 'comm',    color: '#f43f5e', collective: 'ring', parallel: 'DP', note: 'DP 副本间环状 AllReduce 同步梯度' },
+    { id: 'ar',   name: '梯度 AllReduce',  kind: 'comm',    color: '#ff4b7b', collective: 'ring', parallel: 'DP', note: 'DP 副本间环状 AllReduce 同步梯度' },
     { id: 'opt',  name: '优化器更新',      kind: 'store',   color: '#aab4c4', parallel: '—',     note: '更新参数 / 写回（含 store）' },
   ],
   infer: [

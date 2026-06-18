@@ -27,37 +27,48 @@ import {
 } from './data';
 import { TOK } from '../content';
 
-// ─── Light-theme palette ─────────────────────────────────────────────────────
-const LC = {
-  primary:     '#4369ef',
-  rackBody:    '#e8ebf1',
-  rackDoor:    '#dde1e9',
-  rackEdge:    '#aab4c4',
-  rackEdgeHov: '#4369ef',
-  text:        '#1c2433',
-  textDim:     '#6b7890',
-  nodeUnit:    '#f2f4f8',
-  powerUnit:   '#e9edf3',
-  mgmtUnit:    '#e6eaf1',
-  switchUnit:  '#edf0f5',
-  cduUnit:     '#e2e7ee',
-  pcb:         '#bcd2c4',
-  npuBody:     '#e4e8ef',
-  npuTop:      '#aeb8c6',
-  cpuBody:     '#e1e7ea',
-  cpuTop:      '#b2c6c0',
-  ubBody:      '#e8ebf1',
-  dpuBody:     '#e3e8f2',
-  opticalBody: '#dde3ec',
-  dimmBody:    '#e0e5ee',
-  metal:       '#c4cad4',
-  vent:        '#9aa4b2',
-} as const;
+// ─── Theme-aware scene palette ───────────────────────────────────────────────
+// Structural / neutral / text colours for every procedural object. Light variant
+// = brushed-metal greys on a near-white floor; dark variant = graphite surfaces
+// on a near-black floor (PTO-style #101010 stage), so the topology objects and
+// their labels stay legible when the UI theme switches.
+export interface ScenePalette {
+  primary: string; rackBody: string; rackDoor: string; rackEdge: string; rackEdgeHov: string;
+  text: string; textDim: string; textInv: string; nodeUnit: string; powerUnit: string;
+  mgmtUnit: string; switchUnit: string; cduUnit: string; pcb: string; npuBody: string;
+  npuTop: string; cpuBody: string; cpuTop: string; ubBody: string; dpuBody: string;
+  opticalBody: string; dimmBody: string; metal: string; vent: string;
+  substrate: string; substrate2: string; block: string; blockHi: string; blockAlt: string;
+  cardBase: string; bladeBase: string; cabBase: string; hoverTint: string; matIndirect: string; matSelf: string;
+}
+const PALETTE: Record<'light' | 'dark', ScenePalette> = {
+  light: {
+    primary: '#4369ef', rackBody: '#e8ebf1', rackDoor: '#dde1e9', rackEdge: '#aab4c4', rackEdgeHov: '#4369ef',
+    text: '#1c2433', textDim: '#6b7890', textInv: '#ffffff', nodeUnit: '#f2f4f8', powerUnit: '#e9edf3',
+    mgmtUnit: '#e6eaf1', switchUnit: '#edf0f5', cduUnit: '#e2e7ee', pcb: '#bcd2c4', npuBody: '#e4e8ef',
+    npuTop: '#aeb8c6', cpuBody: '#e1e7ea', cpuTop: '#b2c6c0', ubBody: '#e8ebf1', dpuBody: '#e3e8f2',
+    opticalBody: '#dde3ec', dimmBody: '#e0e5ee', metal: '#c4cad4', vent: '#9aa4b2',
+    substrate: '#eef1f6', substrate2: '#eaeef4', block: '#cdd6e4', blockHi: '#d6e0f0', blockAlt: '#dbe6f2',
+    cardBase: '#aeb8c6', bladeBase: '#dbe9fb', cabBase: '#efe7fb', hoverTint: '#dbe4fb', matIndirect: '#e2e6ec', matSelf: '#3a4256',
+  },
+  dark: {
+    primary: '#5b7cff', rackBody: '#23262d', rackDoor: '#1b1e24', rackEdge: '#3d4452', rackEdgeHov: '#5b7cff',
+    text: '#e6e6e6', textDim: '#9aa4b6', textInv: '#ffffff', nodeUnit: '#2a2f38', powerUnit: '#23272f',
+    mgmtUnit: '#262b33', switchUnit: '#2c313a', cduUnit: '#242931', pcb: '#2b3a31', npuBody: '#2b303a',
+    npuTop: '#4b5160', cpuBody: '#283038', cpuTop: '#3e544c', ubBody: '#262b33', dpuBody: '#242a34',
+    opticalBody: '#222831', dimmBody: '#232932', metal: '#565e6c', vent: '#6b7688',
+    substrate: '#1f242c', substrate2: '#1c2128', block: '#2c3442', blockHi: '#314056', blockAlt: '#2a3a4c',
+    cardBase: '#4b5160', bladeBase: '#2c3a52', cabBase: '#332c46', hoverTint: '#2f3c58', matIndirect: '#272c34', matSelf: '#aab4c8',
+  },
+};
+export function scenePalette(dark: boolean): ScenePalette { return dark ? PALETTE.dark : PALETTE.light; }
 
 const L = (i: number) => UB_LEVELS[i].color;       // UB level colour shortcut
 
 // dark/light theme for the 3-D scenes (provided inside the Canvas)
 export const SceneTheme = createContext(false);
+// resolve the structural palette for the current scene theme
+function useLC(): ScenePalette { return scenePalette(useContext(SceneTheme)); }
 
 export interface SceneCallbacks { onHoverInfo: (text: string | null) => void; }
 const setCursor = (on: boolean) => { document.body.style.cursor = on ? 'pointer' : 'default'; };
@@ -174,6 +185,7 @@ function HallSpine({ cells, onHoverInfo }: { cells: CabinetCell[]; onHoverInfo: 
 export function OverviewScene({ gen, highlightCabinet, onHoverInfo, onSelectRack }: SceneCallbacks & {
   gen: GenSpec; highlightCabinet?: number | null; onSelectRack: (kind: RackKind) => void;
 }) {
+  const LC = useLC();
   const cells = useMemo(() => buildHall(gen), [gen]);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const hlId = highlightCabinet != null ? `c-${highlightCabinet}` : null;
@@ -213,6 +225,7 @@ export function OverviewScene({ gen, highlightCabinet, onHoverInfo, onSelectRack
 // ═══════════════════════════════════════════════════════════════════════════
 
 function QuickConnectors({ count, width }: { count: number; width: number }) {
+  const LC = useLC();
   return (
     <group>
       {Array.from({ length: count }, (_, i) => (
@@ -229,6 +242,7 @@ function RackUnitMesh({ unit, rackKind, hovered, clickable, onClick, onHover }: 
   unit: RackUnit; rackKind: RackKind; hovered: boolean; clickable: boolean;
   onClick?: () => void; onHover: (h: boolean) => void;
 }) {
+  const LC = useLC();
   const innerW = RACK_DIM.w * 2.6, innerD = RACK_DIM.d * 2.6, rackH = RACK_DIM.h * 2.6;
   const h = unit.hFrac * rackH * 0.92;
   const y = (unit.y0 + unit.hFrac / 2) * rackH;
@@ -309,6 +323,7 @@ function RackUnitMesh({ unit, rackKind, hovered, clickable, onClick, onHover }: 
 export function RackScene({ rackKind, label, onHoverInfo, onSelectNode, onSelectSwitch }: SceneCallbacks & {
   rackKind: RackKind; label: string; onSelectNode: (slot: number) => void; onSelectSwitch?: () => void;
 }) {
+  const LC = useLC();
   const [hoverId, setHoverId] = useState<string | null>(null);
   const units = rackKind === 'compute' ? COMPUTE_RACK_UNITS : SWITCH_RACK_UNITS;
   const innerW = RACK_DIM.w * 2.6, innerD = RACK_DIM.d * 2.6, rackH = RACK_DIM.h * 2.6;
@@ -388,6 +403,7 @@ function useOptionalTexture(url: string): THREE.Texture | null {
 /** NPU = chip package: metal lid + recessed die/HBM tiles + (optional) vendor mark.
  *  Abstracted from the real package photo. */
 function NpuChip({ w, h, hovered, selected, dim, logo }: { w: number; h?: number; hovered?: boolean; selected?: boolean; dim?: number; logo?: boolean }) {
+  const LC = useLC();
   const hh = h ?? w * 0.5;
   const edge = selected ? COMM_PATTERNS[2].color : hovered ? '#4ade80' : LC.rackEdge;
   const glow = dim ?? (selected ? 0.6 : hovered ? 0.4 : 0);
@@ -437,6 +453,7 @@ function NpuChip({ w, h, hovered, selected, dim, logo }: { w: number; h?: number
 }
 /** CPU = chip package + lid. */
 function CpuChip({ w, h, hovered }: { w: number; h?: number; hovered?: boolean }) {
+  const LC = useLC();
   const hh = h ?? w * 0.5;
   return (
     <group>
@@ -447,6 +464,7 @@ function CpuChip({ w, h, hovered }: { w: number; h?: number; hovered?: boolean }
 }
 /** Blade / compute node = thin tray with a front accent strip. */
 function BladeTray({ w, d, hovered, accent = true }: { w: number; d: number; hovered?: boolean; accent?: boolean }) {
+  const LC = useLC();
   return (
     <group>
       <Slab size={[w, 0.05, d]} color={LC.nodeUnit} edgeColor={hovered ? RACK_COLORS.computeGlow : LC.rackEdge} metalness={0.4} roughness={0.5} />
@@ -456,10 +474,11 @@ function BladeTray({ w, d, hovered, accent = true }: { w: number; d: number; hov
 }
 /** Cabinet = tall sheet-metal box + top status strip (compute vs switch). */
 function CabinetBox({ w = 0.34, h = 1.0, d = 0.5, kind = 'compute', hovered }: { w?: number; h?: number; d?: number; kind?: RackKind; hovered?: boolean }) {
+  const LC = useLC();
   const glow = kind === 'compute' ? RACK_COLORS.computeGlow : RACK_COLORS.switchGlow;
   return (
     <group>
-      <Slab size={[w, h, d]} position={[0, h / 2, 0]} color={hovered ? '#dbe4fb' : LC.rackBody} edgeColor={hovered ? glow : LC.rackEdge} metalness={0.5} roughness={0.5} />
+      <Slab size={[w, h, d]} position={[0, h / 2, 0]} color={hovered ? LC.hoverTint : LC.rackBody} edgeColor={hovered ? glow : LC.rackEdge} metalness={0.5} roughness={0.5} />
       <Slab size={[w * 0.78, 0.03, d * 0.7]} position={[0, h + 0.02, 0]} color={glow} emissive={glow} emissiveIntensity={hovered ? 1.0 : 0.5} />
     </group>
   );
@@ -468,6 +487,7 @@ function CabinetBox({ w = 0.34, h = 1.0, d = 0.5, kind = 'compute', hovered }: {
 function NodePartMesh({ part, hovered, selected, onHover, onSelect }: {
   part: NodePart; hovered: boolean; selected?: boolean; onHover: (h: boolean) => void; onSelect?: () => void;
 }) {
+  const LC = useLC();
   const S = S_NODE;
   const [px, py, pz] = part.pos;
   const [sx, sy, sz] = part.size;
@@ -512,7 +532,7 @@ function NodePartMesh({ part, hovered, selected, onHover, onSelect }: {
         </>
       )}
       {(part.type === 'npu' || part.type === 'cpu') && (
-        <Text position={[0, sy * S * 1.05, 0]} rotation={[-Math.PI / 2, 0, 0]} fontSize={part.type === 'npu' ? 0.06 : 0.045} color="#5a6478" anchorX="center" anchorY="middle">
+        <Text position={[0, sy * S * 1.05, 0]} rotation={[-Math.PI / 2, 0, 0]} fontSize={part.type === 'npu' ? 0.06 : 0.045} color={LC.textDim} anchorX="center" anchorY="middle">
           {part.type === 'npu' ? `${TOK.ascendEn} ${TOK.n950dt}` : `${TOK.kunpengEn} ${TOK.n950}`}
         </Text>
       )}
@@ -546,6 +566,7 @@ const DIE = {
 
 /** Enlarged single-die view: HBM → L1 → L0 → Cube/Vector cores, with tile dataflow. */
 function DieDetail({ npuIdx, overlays, onHoverInfo }: { npuIdx: number; overlays: CommOverlays; onHoverInfo: (t: string | null) => void }) {
+  const LC = useLC();
   const [hx, hz] = [DIE.w / 2, DIE.d / 2];
   const cubeColor = COMM_PATTERNS[2].color;   // thread/tile colour (cyan)
   const tileColor = '#f59e0b';
@@ -575,13 +596,13 @@ function DieDetail({ npuIdx, overlays, onHoverInfo }: { npuIdx: number; overlays
   return (
     <group position={DIE.pos}>
       {/* substrate */}
-      <Slab size={[DIE.w + 0.1, 0.03, DIE.d + 0.1]} position={[0, 0, 0]} color="#eef1f6" edgeColor={LC.rackEdge} />
+      <Slab size={[DIE.w + 0.1, 0.03, DIE.d + 0.1]} position={[0, 0, 0]} color={LC.substrate} edgeColor={LC.rackEdge} />
       {/* HBM stack (left) */}
-      <Block x={-hx + 0.18} z={0} w={0.22} d={DIE.d * 0.8} label="HBM 144GB" color="#cdd6e4" />
+      <Block x={-hx + 0.18} z={0} w={0.22} d={DIE.d * 0.8} label="HBM 144GB" color={LC.block} />
       {/* L1 SRAM */}
-      <Block x={-hx + 0.62} z={0} w={0.2} d={DIE.d * 0.7} label="L1 512KB" color="#d6e0f0" />
+      <Block x={-hx + 0.62} z={0} w={0.2} d={DIE.d * 0.7} label="L1 512KB" color={LC.blockHi} />
       {/* L0A/L0B buffers */}
-      <Block x={-0.1} z={hz - 0.28} w={0.5} d={0.18} label="L0A/B 64KB" color="#dbe6f2" />
+      <Block x={-0.1} z={hz - 0.28} w={0.5} d={0.18} label="L0A/B 64KB" color={LC.blockAlt} />
       {/* AI Core array: Cube + Vector */}
       {overlays.cores && (
         <group>
@@ -605,7 +626,7 @@ function DieDetail({ npuIdx, overlays, onHoverInfo }: { npuIdx: number; overlays
         </group>
       )}
       {/* L0C accumulator */}
-      <Block x={0.55} z={-hz + 0.3} w={0.5} d={0.18} label="L0C 256KB" color="#dbe6f2" />
+      <Block x={0.55} z={-hz + 0.3} w={0.5} d={0.18} label="L0C 256KB" color={LC.blockAlt} />
       {/* tile dataflow */}
       {overlays.tile && (
         <group
@@ -627,6 +648,7 @@ function DieDetail({ npuIdx, overlays, onHoverInfo }: { npuIdx: number; overlays
 export type UbJump = { view: 'topology' | 'matrix'; focus: 'ccu' | 'onchip' | 'ub' };
 const IODIE = { pos: [-2.7, 0.06, 0] as [number, number, number], w: 1.8, d: 1.1 };
 function IoDieDetail({ onHoverInfo, onJump }: { onHoverInfo: (t: string | null) => void; onJump?: (t: UbJump) => void }) {
+  const LC = useLC();
   const [hx, hz] = [IODIE.w / 2, IODIE.d / 2];
   const portColor = '#9aa4b2';
   // 18 ports in 2 rows × 9 along the top
@@ -645,7 +667,7 @@ function IoDieDetail({ onHoverInfo, onJump }: { onHoverInfo: (t: string | null) 
 
   return (
     <group position={IODIE.pos}>
-      <Slab size={[IODIE.w + 0.1, 0.03, IODIE.d + 0.1]} position={[0, 0, 0]} color="#eaeef4" edgeColor={LC.rackEdge} />
+      <Slab size={[IODIE.w + 0.1, 0.03, IODIE.d + 0.1]} position={[0, 0, 0]} color={LC.substrate2} edgeColor={LC.rackEdge} />
       {/* 18 UB ports */}
       <group
         onPointerOver={(e) => { e.stopPropagation(); setCursor(true); onHoverInfo(`18× x4 ${TOK.ub} Port（72 HiLink lane · 112Gbps · 2016 GB/s 双向）· Scale-up/out 端口复用 · 点击→邻接矩阵看 NPU↔NPU 互联`); }}
@@ -713,6 +735,7 @@ function BoardMesh() {
 }
 
 export function NodeScene({ onHoverInfo, overlays, onJump, initialSelected }: SceneCallbacks & { overlays: CommOverlays; onJump?: (t: UbJump) => void; initialSelected?: number }) {
+  const LC = useLC();
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [selected, setSelected] = useState(initialSelected ?? 0);   // which NPU's die is enlarged
   useEffect(() => { if (initialSelected != null) setSelected(initialSelected % NPUS_PER_NODE); }, [initialSelected]);
@@ -787,6 +810,7 @@ const HT = {
 };
 
 export function TopologyScene({ gen, overlays, highlight, subFocus, onHoverInfo }: SceneCallbacks & { gen: GenSpec; overlays: CommOverlays; highlight?: { npu: number; blade: number } | null; subFocus?: 'ccu' | 'onchip' | 'ub' | null }) {
+  const LC = useLC();
   const [hov, setHov] = useState<number | null>(null);
   const [focus, setFocus] = useState<number | null>(null);   // focused parent level (highlight its downstream link)
   const cabs = Math.max(1, Math.round(gen.totalNpus / 64));
@@ -1047,6 +1071,7 @@ const MAT_POS: [number, number, number] = [-3.7, 2.2, 0];
 const MODEL_POS: [number, number, number] = [3.3, 0.5, 0];
 
 export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale: Scale }) {
+  const LC = useLC();
   const spec = SCALES[scale];
   const dims = spec.dims;
   const switched = spec.kind === 'switched';
@@ -1078,8 +1103,8 @@ export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale:
     if (!mesh) return;
     const m = new THREE.Matrix4();
     const col = new THREE.Color();
-    const cSelf = new THREE.Color('#3a4256');
-    const cIndirect = new THREE.Color('#e2e6ec');
+    const cSelf = new THREE.Color(LC.matSelf);
+    const cIndirect = new THREE.Color(LC.matIndirect);
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) {
         const idx = i * n + j;
@@ -1251,7 +1276,7 @@ export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale:
           <group>
             <mesh position={[cabBox.cx, cabBox.cy, -0.12]}>
               <planeGeometry args={[cabBox.w, cabBox.h]} />
-              <meshBasicMaterial color="#eef1f6" transparent opacity={0.5} />
+              <meshBasicMaterial color={LC.substrate} transparent opacity={0.5} />
             </mesh>
             <Line points={[[cabBox.cx - cabBox.w / 2, cabBox.cy - cabBox.h / 2, -0.11], [cabBox.cx + cabBox.w / 2, cabBox.cy - cabBox.h / 2, -0.11], [cabBox.cx + cabBox.w / 2, cabBox.cy + cabBox.h / 2, -0.11], [cabBox.cx - cabBox.w / 2, cabBox.cy + cabBox.h / 2, -0.11], [cabBox.cx - cabBox.w / 2, cabBox.cy - cabBox.h / 2, -0.11]]} color={LC.rackEdge} lineWidth={1.5} />
             <Text position={[cabBox.cx - cabBox.w / 2 + 0.05, cabBox.cy + cabBox.h / 2 + 0.12, 0]} fontSize={0.13} color={LC.textDim} anchorX="left">单柜 (1 cabinet)</Text>
@@ -1322,6 +1347,7 @@ export function AdjacencyScene({ scale, onHoverInfo }: SceneCallbacks & { scale:
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function UBSwitchScene({ onHoverInfo }: SceneCallbacks) {
+  const LC = useLC();
   const [hov, setHov] = useState<string | null>(null);
   const S = 2.4;
   const W = 1.15 * S, H = 0.3 * S, D = 0.62 * S;
@@ -1410,6 +1436,7 @@ const PROC_COLOR = '#4369ef';                 // process / rank
 const THREAD_COLOR = COMM_PATTERNS[2].color;  // thread / tile (cyan)
 
 export function MappingScene({ onHoverInfo }: SceneCallbacks) {
+  const LC = useLC();
   const [focus, setFocus] = useState<number | null>(null);
   const swX = -2.8, hwX = 2.8;
   const rows: { sw: string; hw: string; key?: 'proc' | 'thread'; tag?: string; info: string }[] = [
@@ -1423,7 +1450,7 @@ export function MappingScene({ onHoverInfo }: SceneCallbacks) {
 
   const SwBox = ({ yy, label, on }: { yy: number; label: string; on: boolean }) => (
     <group position={[swX, yy, 0]}>
-      <Slab size={[2.0, 0.6, 0.06]} color={on ? '#cdd9fb' : '#e7ecf8'} edgeColor={on ? PROC_COLOR : LC.rackEdge} />
+      <Slab size={[2.0, 0.6, 0.06]} color={on ? LC.hoverTint : LC.nodeUnit} edgeColor={on ? PROC_COLOR : LC.rackEdge} />
       <Text position={[0, 0, 0.05]} fontSize={0.16} color={LC.text} anchorX="center" anchorY="middle" maxWidth={1.9}>{label}</Text>
     </group>
   );
@@ -1478,6 +1505,7 @@ export function MappingScene({ onHoverInfo }: SceneCallbacks) {
 export interface LocateTarget { rank: number; blade: number; thread: number | null }
 
 export function TraceScene({ onHoverInfo, onLocate, tick }: SceneCallbacks & { onLocate?: (t: LocateTarget | null) => void; tick: number | null }) {
+  const LC = useLC();
   const [sel, setSel] = useState<{ p: number; t: number | null } | null>(null);
   const P = 4, T = 3;
   const bladeOf = (p: number) => Math.floor(p / 2);
@@ -1562,7 +1590,7 @@ export function TraceScene({ onHoverInfo, onLocate, tick }: SceneCallbacks & { o
             onPointerOut={() => { setCursor(false); onHoverInfo(null); }}
             onClick={(e) => { e.stopPropagation(); pick(on && sel?.t === null ? null : { p, t: null }); }}
           >
-            <Slab size={[0.6, 0.2, 0.3]} color={on ? '#dbe4fb' : '#eef1f6'} emissive={commNow ? COMM_PATTERNS[0].color : '#000000'} emissiveIntensity={commNow ? 0.4 : 0} edgeColor={on ? PROC_COLOR : LC.rackEdge} />
+            <Slab size={[0.6, 0.2, 0.3]} color={on ? LC.hoverTint : LC.substrate} emissive={commNow ? COMM_PATTERNS[0].color : '#000000'} emissiveIntensity={commNow ? 0.4 : 0} edgeColor={on ? PROC_COLOR : LC.rackEdge} />
             <Text position={[0, 0, 0.18]} fontSize={0.11} color={on ? PROC_COLOR : LC.text} anchorX="center" anchorY="middle">{`rank ${p}`}</Text>
           </group>
         );
@@ -1621,6 +1649,7 @@ const FP_A2A_CAP = 64;          // per-supernode ≤ this → draw the All-to-Al
 export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, phase, partition, peers, status, onHoverInfo, onPick }: SceneCallbacks & {
   scale: Scale; podCount: number; full: boolean; gen: GenSpec; overlays: CommOverlays; runMode: RunMode; phase: RunPhase | null; partition: PartitionDim; peers: boolean; status: boolean; onPick?: (npuLocal: number) => void;
 }) {
+  const LC = useLC();
   const [hoverNpu, setHoverNpu] = useState<number | null>(null);
   const [sel, setSel] = useState<{ lv: number; i: number } | null>(null);   // selection: lv 0 card / 1 blade / 2 cabinet → highlight its up/down-stream + peer mesh
   const [focus, setFocus] = useState<number | null>(null);   // focused band index → highlight its downstream link
@@ -1763,9 +1792,9 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
     const tm = thrRef.current;
     if (tm) { col.set(THREAD_COLOR); for (let k = 0; k < G.N; k++) for (let t = 0; t < FP_THREADS; t++) { const idx = k * FP_THREADS + t; m.makeScale(0.045, 0.045, 0.045); m.setPosition(G.cardX[k] + (t - (FP_THREADS - 1) / 2) * G.thrPitch, G.yThread, G.cardZ[k]); tm.setMatrixAt(idx, m); tm.setColorAt(idx, col); } tm.count = G.N * FP_THREADS; tm.instanceMatrix.needsUpdate = true; if (tm.instanceColor) tm.instanceColor.needsUpdate = true; }
     const bm = bladeInst.current;
-    if (bm) { col.set('#dbe9fb'); for (let b = 0; b < G.nBlades; b++) { m.makeScale(0.42, 0.08, 0.3); m.setPosition(G.bladeMX[b], G.yBlade, G.bladeMZ[b]); bm.setMatrixAt(b, m); bm.setColorAt(b, col); } bm.count = G.nBlades; bm.instanceMatrix.needsUpdate = true; if (bm.instanceColor) bm.instanceColor.needsUpdate = true; }
+    if (bm) { col.set(LC.bladeBase); for (let b = 0; b < G.nBlades; b++) { m.makeScale(0.42, 0.08, 0.3); m.setPosition(G.bladeMX[b], G.yBlade, G.bladeMZ[b]); bm.setMatrixAt(b, m); bm.setColorAt(b, col); } bm.count = G.nBlades; bm.instanceMatrix.needsUpdate = true; if (bm.instanceColor) bm.instanceColor.needsUpdate = true; }
     const cm = cabInst.current;
-    if (cm) { col.set('#efe7fb'); for (let c = 0; c < G.nCabs; c++) { m.makeScale(Math.min(2.2, G.cw * 0.5), 0.1, Math.min(2.2, G.cd * 0.4)); m.setPosition(G.cabMX[c], G.yCab, G.cabMZ[c]); cm.setMatrixAt(c, m); cm.setColorAt(c, col); } cm.count = G.nCabs; cm.instanceMatrix.needsUpdate = true; if (cm.instanceColor) cm.instanceColor.needsUpdate = true; }
+    if (cm) { col.set(LC.cabBase); for (let c = 0; c < G.nCabs; c++) { m.makeScale(Math.min(2.2, G.cw * 0.5), 0.1, Math.min(2.2, G.cd * 0.4)); m.setPosition(G.cabMX[c], G.yCab, G.cabMZ[c]); cm.setMatrixAt(c, m); cm.setColorAt(c, col); } cm.count = G.nCabs; cm.instanceMatrix.needsUpdate = true; if (cm.instanceColor) cm.instanceColor.needsUpdate = true; }
   }, [G, useChip, chipTex]);
 
   // phase wash + selection highlight: compute → AI cores / cards heat; comm → ranks pulse;
@@ -1784,8 +1813,8 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
     if (pm) for (let k = 0; k < G.N; k++) { if (status) col.set(sProc); else if (onPart) col.set(pcol(part.groupOf(k))); else { col.copy(procBase); if (commNow && tint) col.lerp(tint, 0.7); } pm.setColorAt(k, col); }
     if (tm) for (let i = 0; i < G.N * FP_THREADS; i++) { if (status) col.set(sThr); else if (onPart) col.set(pcol(part.groupOf(Math.floor(i / FP_THREADS)))); else { col.copy(thrBase); if (computeNow && tint) col.lerp(tint, 0.7); } tm.setColorAt(i, col); }
     if (nm && !useChip) for (let k = 0; k < G.N; k++) { if (k === lastHov.current) continue; if (status) col.set(sCard); else if (onPart) col.set(pcol(part.groupOf(k))); else { col.set(cardBase); if (computeNow && tint) col.lerp(tint, 0.34); } nm.setColorAt(k, col); }
-    if (bm) for (let b = 0; b < G.nBlades; b++) { if (onPart && partition !== 'tp') col.set(pcol(part.groupOf(b * FP_CARDS_PER_BLADE))); else col.set('#dbe9fb'); bm.setColorAt(b, col); }
-    if (cm) for (let c = 0; c < G.nCabs; c++) cm.setColorAt(c, col.set('#efe7fb'));
+    if (bm) for (let b = 0; b < G.nBlades; b++) { if (onPart && partition !== 'tp') col.set(pcol(part.groupOf(b * FP_CARDS_PER_BLADE))); else col.set(LC.bladeBase); bm.setColorAt(b, col); }
+    if (cm) for (let c = 0; c < G.nCabs; c++) cm.setColorAt(c, col.set(LC.cabBase));
     // selection → light up the actual objects on the chain (cards + ranks + threads + blade/cabinet markers)
     if (sel) {
       const cardsH: number[] = [], bladesH: number[] = [], cabsH: number[] = [];

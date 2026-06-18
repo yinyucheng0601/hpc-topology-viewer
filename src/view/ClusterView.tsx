@@ -311,14 +311,14 @@ export function ClusterView() {
             <CameraController poseKey={`${mode}-${gen}-${scale}-${nodeKind}-${podCount}-${fpFull}`} pos={cam.pos} target={cam.target} controls={controlsRef} />
             <color attach="background" args={[dark ? '#101010' : '#f5f5f5']} />
             <fog attach="fog" args={[dark ? '#101010' : '#f5f5f5', mode === 'fullpod' ? 90 : 26, mode === 'fullpod' ? 420 : 60]} />
-            <ambientLight intensity={1.1} />
+            <ambientLight intensity={dark ? 1.35 : 1.05} />
             <directionalLight
-              position={[8, 14, 6]} intensity={1.2} castShadow
+              position={[8, 14, 6]} intensity={dark ? 0.95 : 1.2} castShadow
               shadow-mapSize={[2048, 2048]}
               shadow-camera-left={-16} shadow-camera-right={16}
               shadow-camera-top={16} shadow-camera-bottom={-16}
             />
-            <pointLight position={[0, 10, 0]} intensity={1.0} color="#e8f0ff" />
+            <pointLight position={[0, 10, 0]} intensity={dark ? 0.7 : 1.0} color={dark ? '#7e93cf' : '#e8f0ff'} />
 
             <SceneTheme.Provider value={dark}>
             {mode === 'overview' && (
