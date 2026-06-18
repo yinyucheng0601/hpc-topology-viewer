@@ -1764,22 +1764,39 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
     if (cm) { col.set('#efe7fb'); for (let c = 0; c < G.nCabs; c++) { m.makeScale(Math.min(2.2, G.cw * 0.5), 0.1, Math.min(2.2, G.cd * 0.4)); m.setPosition(G.cabMX[c], G.yCab, G.cabMZ[c]); cm.setMatrixAt(c, m); cm.setColorAt(c, col); } cm.count = G.nCabs; cm.instanceMatrix.needsUpdate = true; if (cm.instanceColor) cm.instanceColor.needsUpdate = true; }
   }, [G, useChip, chipTex]);
 
-  // phase wash: compute → AI cores (threads) + a card heat tint; comm → ranks pulse the
-  // collective colour. Driven by the run schedule; re-runs only on phase change.
+  // phase wash + selection highlight: compute → AI cores / cards heat; comm → ranks pulse;
+  // partition → group colour on card/rank/thread; selection → the actual chain objects glow amber.
   useLayoutEffect(() => {
-    const col = new THREE.Color(), procBase = new THREE.Color(PROC_COLOR), thrBase = new THREE.Color(THREAD_COLOR);
+    const col = new THREE.Color(), procBase = new THREE.Color(PROC_COLOR), thrBase = new THREE.Color(THREAD_COLOR), hl = new THREE.Color('#ffb020');
     const tint = phase ? new THREE.Color(phase.color) : null;
     const cardBase = chipTex ? '#ffffff' : LC.npuTop;
-    const pm = procRef.current, tm = thrRef.current, nm = cardInst.current;
+    const pm = procRef.current, tm = thrRef.current, nm = cardInst.current, bm = bladeInst.current, cm = cabInst.current;
     const onPart = partition !== 'none';
     const pcol = (g: number) => PARTITION_PALETTE[g % PARTITION_PALETTE.length];
-    // when a partition is on, card + its rank(process) + its compute slices(threads) all carry the group colour
-    if (pm) { for (let k = 0; k < G.N; k++) { if (onPart) col.set(pcol(part.groupOf(k))); else { col.copy(procBase); if (commNow && tint) col.lerp(tint, 0.7); } pm.setColorAt(k, col); } if (pm.instanceColor) pm.instanceColor.needsUpdate = true; }
-    if (tm) { for (let i = 0; i < G.N * FP_THREADS; i++) { if (onPart) col.set(pcol(part.groupOf(Math.floor(i / FP_THREADS)))); else { col.copy(thrBase); if (computeNow && tint) col.lerp(tint, 0.7); } tm.setColorAt(i, col); } if (tm.instanceColor) tm.instanceColor.needsUpdate = true; }
-    if (nm && !useChip) { for (let k = 0; k < G.N; k++) { if (k === lastHov.current) continue; if (onPart) col.set(pcol(part.groupOf(k))); else { col.set(cardBase); if (computeNow && tint) col.lerp(tint, 0.34); } nm.setColorAt(k, col); } if (nm.instanceColor) nm.instanceColor.needsUpdate = true; }
-    const bm = bladeInst.current;   // TP is sub-node → blade markers stay neutral for TP; PP/DP/EP carry the group
-    if (bm) { for (let b = 0; b < G.nBlades; b++) { if (onPart && partition !== 'tp') col.set(pcol(part.groupOf(b * FP_CARDS_PER_BLADE))); else col.set('#dbe9fb'); bm.setColorAt(b, col); } if (bm.instanceColor) bm.instanceColor.needsUpdate = true; }
-  }, [G, phase, computeNow, commNow, useChip, chipTex, partition, part]);
+    if (pm) for (let k = 0; k < G.N; k++) { if (onPart) col.set(pcol(part.groupOf(k))); else { col.copy(procBase); if (commNow && tint) col.lerp(tint, 0.7); } pm.setColorAt(k, col); }
+    if (tm) for (let i = 0; i < G.N * FP_THREADS; i++) { if (onPart) col.set(pcol(part.groupOf(Math.floor(i / FP_THREADS)))); else { col.copy(thrBase); if (computeNow && tint) col.lerp(tint, 0.7); } tm.setColorAt(i, col); }
+    if (nm && !useChip) for (let k = 0; k < G.N; k++) { if (k === lastHov.current) continue; if (onPart) col.set(pcol(part.groupOf(k))); else { col.set(cardBase); if (computeNow && tint) col.lerp(tint, 0.34); } nm.setColorAt(k, col); }
+    if (bm) for (let b = 0; b < G.nBlades; b++) { if (onPart && partition !== 'tp') col.set(pcol(part.groupOf(b * FP_CARDS_PER_BLADE))); else col.set('#dbe9fb'); bm.setColorAt(b, col); }
+    if (cm) for (let c = 0; c < G.nCabs; c++) cm.setColorAt(c, col.set('#efe7fb'));
+    // selection → light up the actual objects on the chain (cards + ranks + threads + blade/cabinet markers)
+    if (sel) {
+      const cardsH: number[] = [], bladesH: number[] = [], cabsH: number[] = [];
+      const addBlade = (b: number) => { bladesH.push(b); for (let i = 0; i < FP_CARDS_PER_BLADE; i++) { const k = b * FP_CARDS_PER_BLADE + i; if (k < G.N) cardsH.push(k); } };
+      if (sel.lv === 0 && sel.i < G.N) { const k = sel.i, b = G.cardBlade[k]; cardsH.push(k); bladesH.push(b); cabsH.push(G.bladeCab[b]); }
+      else if (sel.lv === 1 && sel.i < G.nBlades) { addBlade(sel.i); cabsH.push(G.bladeCab[sel.i]); }
+      else if (sel.lv === 2 && sel.i < G.nCabs) { cabsH.push(sel.i); for (let b = 0; b < G.nBlades; b++) if (G.bladeCab[b] === sel.i) addBlade(b); }
+      if (nm && !useChip) for (const k of cardsH) nm.setColorAt(k, hl);
+      if (pm) for (const k of cardsH) pm.setColorAt(k, hl);
+      if (tm) for (const k of cardsH) for (let t = 0; t < FP_THREADS; t++) tm.setColorAt(k * FP_THREADS + t, hl);
+      if (bm) for (const b of bladesH) bm.setColorAt(b, hl);
+      if (cm) for (const c of cabsH) cm.setColorAt(c, hl);
+    }
+    if (pm?.instanceColor) pm.instanceColor.needsUpdate = true;
+    if (tm?.instanceColor) tm.instanceColor.needsUpdate = true;
+    if (nm?.instanceColor) nm.instanceColor.needsUpdate = true;
+    if (bm?.instanceColor) bm.instanceColor.needsUpdate = true;
+    if (cm?.instanceColor) cm.instanceColor.needsUpdate = true;
+  }, [G, phase, computeNow, commNow, useChip, chipTex, partition, part, sel]);
 
   // imperative single-instance hover for the instanced-card path (avoids 8 K-loop per move)
   const hoverCard = (k: number | null) => {
@@ -1804,35 +1821,35 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
     const bPos = (b: number): [number, number, number] => [G.bladeMX[b], G.yBlade, G.bladeMZ[b]];
     const caPos = (c: number): [number, number, number] => [G.cabMX[c], G.yCab, G.cabMZ[c]];
     const sPos = (p: number): [number, number, number] => [G.superMX[p], G.ySuper, 0];
-    const vSegs: [number, number, number][] = [], pSegs: [number, number, number][] = [], boxes: [number, number, number][] = [], spheres: [number, number, number][] = [];
+    const vSegs: [number, number, number][] = [], pSegs: [number, number, number][] = [], cards: number[] = [];
     const bladeCards = (b: number): number[] => { const base = b * FP_CARDS_PER_BLADE, r: number[] = []; for (let i = 0; i < FP_CARDS_PER_BLADE; i++) if (base + i < G.N) r.push(base + i); return r; };
-    const down = (k: number) => { for (let t = 0; t < FP_THREADS; t++) vSegs.push([G.cardX[k] + (t - (FP_THREADS - 1) / 2) * G.thrPitch, G.yThread, G.cardZ[k]], pPos(k)); vSegs.push(pPos(k), cPos(k)); boxes.push(cPos(k)); };
+    const down = (k: number) => { for (let t = 0; t < FP_THREADS; t++) vSegs.push([G.cardX[k] + (t - (FP_THREADS - 1) / 2) * G.thrPitch, G.yThread, G.cardZ[k]], pPos(k)); vSegs.push(pPos(k), cPos(k)); cards.push(k); };
     const meshPairs = (xs: number[], f: (x: number) => [number, number, number]) => { for (let i = 0; i < xs.length; i++) for (let j = i + 1; j < xs.length; j++) pSegs.push(f(xs[i]), f(xs[j])); };
-    const upFromCab = (c: number) => { const p = G.cabSuper[c]; vSegs.push(caPos(c), sPos(p)); spheres.push(caPos(c), sPos(p)); if (podCount > 1) vSegs.push(sPos(p), G.cluster); };
-    let dieK: number | null = null, label = '', labelPos: [number, number, number] = [0, 0, 0];
+    let dieK: number | null = null, label = '', labelPos: [number, number, number] = [0, 0, 0], superP = 0;
+    const upFromCab = (c: number) => { superP = G.cabSuper[c]; vSegs.push(caPos(c), sPos(superP)); if (podCount > 1) vSegs.push(sPos(superP), G.cluster); };
 
     if (sel.lv === 0) {
       const k = sel.i; if (k >= G.N) return null;
       const b = G.cardBlade[k], c = G.bladeCab[b];
-      down(k); vSegs.push(cPos(k), bPos(b), bPos(b), caPos(c)); spheres.push(bPos(b)); upFromCab(c);
+      down(k); vSegs.push(cPos(k), bPos(b), bPos(b), caPos(c)); upFromCab(c);
       meshPairs([k, ...bladeCards(b).filter((j) => j !== k)], cPos);   // card k ↔ its blade-mates (L1 board mesh)
       dieK = k; label = `NPU ${k}`; labelPos = cPos(k);
     } else if (sel.lv === 1) {
       const b = sel.i; if (b >= G.nBlades) return null;
       const c = G.bladeCab[b], ks = bladeCards(b);
       for (const k of ks) { down(k); vSegs.push(cPos(k), bPos(b)); }
-      vSegs.push(bPos(b), caPos(c)); spheres.push(bPos(b)); upFromCab(c);
+      vSegs.push(bPos(b), caPos(c)); upFromCab(c);
       meshPairs(ks, cPos);   // L1 board mesh: all 8 cards card↔card
       label = `刀片 B${b} · ${ks.length}×NPU`; labelPos = bPos(b);
     } else {
       const c = sel.i; if (c >= G.nCabs) return null;
       const blades: number[] = [];
       for (let b = 0; b < G.nBlades; b++) if (G.bladeCab[b] === c) blades.push(b);
-      for (const b of blades) { const ks = bladeCards(b); for (const k of ks) { down(k); vSegs.push(cPos(k), bPos(b)); } vSegs.push(bPos(b), caPos(c)); spheres.push(bPos(b)); meshPairs(ks, cPos); }
+      for (const b of blades) { const ks = bladeCards(b); for (const k of ks) { down(k); vSegs.push(cPos(k), bPos(b)); } vSegs.push(bPos(b), caPos(c)); meshPairs(ks, cPos); }
       meshPairs(blades, bPos);   // L2 node mesh: blade↔blade within the cabinet
       upFromCab(c); label = `机柜 C${c} · ${blades.length} 刀片`; labelPos = caPos(c);
     }
-    return { vSegs, pSegs, boxes, spheres, dieK, label, labelPos };
+    return { vSegs, pSegs, cards, superP, dieK, label, labelPos };
   }, [sel, G, podCount]);
 
   // die-inset callout placement: left of the field, scaled to the field size so it stays readable
@@ -1891,12 +1908,15 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
         <boxGeometry args={[1, 1, 1]} /><meshStandardMaterial metalness={0.3} roughness={0.55} toneMapped={false} />
       </instancedMesh>
       {/* L3 super-node + L4 cluster markers */}
-      {G.superMX.map((sx, p) => (
-        <group key={p}>
-          <Slab size={[Math.min(2.6, G.superW * 0.5), 0.22, 0.3]} position={[sx, G.ySuper, 0]} color={L(3)} emissive={L(3)} emissiveIntensity={0.5} />
-          <Text position={[sx, G.ySuper + 0.32, 0]} fontSize={lblSize} color={L(3)} anchorX="center">{`${TOK.supernode} P${p}`}</Text>
-        </group>
-      ))}
+      {G.superMX.map((sx, p) => {
+        const on = selPath !== null && selPath.superP === p;
+        return (
+          <group key={p}>
+            <Slab size={[Math.min(2.6, G.superW * 0.5), 0.22, 0.3]} position={[sx, G.ySuper, 0]} color={on ? '#ffb020' : L(3)} emissive={on ? '#ffb020' : L(3)} emissiveIntensity={on ? 0.9 : 0.5} />
+            <Text position={[sx, G.ySuper + 0.32, 0]} fontSize={lblSize} color={on ? '#b45309' : L(3)} anchorX="center">{`${TOK.supernode} P${p}`}</Text>
+          </group>
+        );
+      })}
       {podCount > 1 && <Slab size={[Math.min(3.4, G.fieldW * 0.4), 0.2, 0.3]} position={G.cluster} color={L(4)} emissive={L(4)} emissiveIntensity={0.4} opacity={0.85} edgeColor={L(4)} />}
 
       {/* L0 cards — individual textured NpuChip (≤cap) else instanced (texture-mapped) */}
@@ -1907,7 +1927,7 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
             onPointerOut={() => { lastHov.current = -1; setHoverNpu(null); setCursor(false); onHoverInfo(null); }}
             onClick={(e) => { e.stopPropagation(); toggleSel(0, k); }}
             onDoubleClick={(e) => { e.stopPropagation(); onPick?.(k % 8); }}>
-            <NpuChip w={0.34} h={0.18} hovered={hoverNpu === k} selected={hoverNpu === k || (sel?.lv === 0 && sel.i === k)} logo />
+            <NpuChip w={0.34} h={0.18} hovered={hoverNpu === k} selected={hoverNpu === k || (selPath !== null && selPath.cards.includes(k))} logo />
           </group>
         ))
         : (
@@ -1924,14 +1944,9 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
       {/* selection → peer mesh (cyan, same-level card↔card / node↔node) + up/down-stream chain (amber) + die inset (card only) */}
       {selPath && (
         <group>
+          {/* the chain objects themselves glow amber (recoloured in the effect); here just the route + peer mesh */}
           {selPath.pSegs.length > 0 && <Line points={selPath.pSegs} segments color="#22d3ee" lineWidth={2.6} transparent opacity={0.95} />}
           {selPath.vSegs.length > 0 && <Line points={selPath.vSegs} segments color="#ffb020" lineWidth={3} transparent opacity={0.92} />}
-          {selPath.spheres.map((p, i) => (
-            <mesh key={`s${i}`} position={p}><sphereGeometry args={[0.16, 12, 12]} /><meshStandardMaterial color="#ffb020" emissive="#ffb020" emissiveIntensity={0.7} toneMapped={false} /></mesh>
-          ))}
-          {selPath.boxes.map((p, i) => (
-            <mesh key={`b${i}`} position={p}><boxGeometry args={[0.5, 0.18, 0.5]} /><meshBasicMaterial color="#ffb020" wireframe transparent opacity={0.9} /></mesh>
-          ))}
           {selPath.dieK !== null ? (
             <group>
               {/* die-operator inset for a selected card (reuses DieDetail), with a leader line */}
