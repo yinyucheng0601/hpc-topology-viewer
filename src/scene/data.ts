@@ -129,6 +129,12 @@ export const PARTITION_META: Record<Exclude<PartitionDim, 'none'>, { label: stri
 // cycling palette: group g → PARTITION_PALETTE[g % len] (same colour = same parallel group)
 export const PARTITION_PALETTE = ['#ef4444', '#f59e0b', '#eab308', '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899', '#10b981', '#f97316', '#06b6d4', '#a855f7'];
 
+// canonical signature colour per parallel dimension (one colour each for none/TP/PP/DP/EP),
+// used for the dimension *selector* chips + legends so each dim reads consistently.
+export const PARALLEL_COLORS: Record<PartitionDim, string> = {
+  none: '#7c8db8', tp: '#4369ef', pp: '#04d793', dp: '#ffaa3b', ep: '#ff4b7b',
+};
+
 // ─── Live status / flow overlay (full-pod): node activity + link state ────────
 // Node colour = current activity (from the run phase); link thickness = bandwidth
 // (intra-node L1 fattest → scale-out L4 thinnest) with a flow surge on the active
@@ -156,6 +162,21 @@ export const RUN_SCHED: Record<RunMode, RunPhase[]> = {
     { id: 'kv',  name: 'KV-Cache 读写',      kind: 'mem',     color: '#a78bfa', parallel: '—', note: '每步读写 KV-Cache（显存带宽受限）' },
   ],
 };
+
+// ─── Per-card memory hierarchy (single NPU) — illustrative occupancy ──────────
+// Bridges the cluster topology down to the on-chip story PTO focuses on: where a
+// rank's bytes live and where the bottleneck usually is. `util` is a schematic
+// fill ratio (NOT a measured profile), drawn in the PTO 14%-fill / 34%-stroke style.
+export interface MemLayer { id: string; name: string; cap: string; util: number; color: string; note: string; }
+export function memLayers(gen: GenSpec): MemLayer[] {
+  return [
+    { id: 'hbm', name: `HBM（${gen.hbm}）`, cap: `${gen.memGB} GB`, util: 0.78, color: '#4369ef', note: '权重 + 激活 + KV-Cache，带宽常为瓶颈' },
+    { id: 'l2',  name: 'L2 全局缓存',        cap: gen.l2MB ? `${gen.l2MB} MB` : '—', util: 0.62, color: '#7c8db8', note: 'die 内共享，算子间数据复用' },
+    { id: 'ub',  name: 'UB Memory',          cap: '512 KB', util: 0.5, color: '#04d793', note: '统一编址，跨 NPU 池化访问' },
+    { id: 'l1',  name: 'L1（片上 SRAM）',    cap: '512 KB', util: 0.7, color: '#ffaa3b', note: 'Tile 驻留，搬运 HBM→L1→L0' },
+    { id: 'l0',  name: 'L0A/B/C',            cap: '64–256 KB', util: 0.85, color: '#ff4b7b', note: 'Cube/Vector 计算缓冲，最贴近算力' },
+  ];
+}
 
 export const RACK_COLORS = {
   accent: '#e0252f',

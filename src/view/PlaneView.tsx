@@ -8,7 +8,7 @@
  * Display text with brand terms is sourced from ../content (decoded at runtime).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { GENERATIONS, PARTITION_PALETTE, PARTITION_META, UB_LEVELS, COMM_PATTERNS, type Gen, type PartitionDim } from '../scene/data';
+import { GENERATIONS, PARTITION_PALETTE, PARALLEL_COLORS, PARTITION_META, UB_LEVELS, COMM_PATTERNS, type Gen, type PartitionDim } from '../scene/data';
 import { TOK } from '../content';
 
 const CPB = 8, BPC = 8;   // cards / blade, blades / cabinet (= 64 NPU / cabinet)
@@ -148,9 +148,26 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
       ctx.stroke(); ctx.globalAlpha = 1;
     }
 
-    // hovered card outline
+    // hovered card: "active" glow on its links — board neighbours (L1) + its blade↔
+    // cabinet blades (L2). Rounded caps + shadow blur = a flow-engine "active" style.
     const hk = hoverRef.current;
-    if (hk != null) { const [x, y] = cardXY(hk); ctx.lineWidth = 2.5 / s; ctx.strokeStyle = '#ffb020'; ctx.strokeRect(x - 0.06, y - 0.06, L.cs + 0.12, L.cs + 0.12); }
+    if (hk != null) {
+      const b = Math.floor(hk / CPB), cab = Math.floor(b / BPC);
+      const [hx, hy] = cardXY(hk); const hc: [number, number] = [hx + L.cs / 2, hy + L.cs / 2];
+      ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      // L2: hovered blade centre → other blade centres in the cabinet
+      const [bx, by] = bladeXY(cab, b % BPC); const bc: [number, number] = [bx + L.bw / 2, by + L.bh / 2];
+      ctx.strokeStyle = UB_LEVELS[2].color; ctx.shadowColor = UB_LEVELS[2].color; ctx.shadowBlur = 10; ctx.lineWidth = 1.6 / s; ctx.globalAlpha = 0.9; ctx.beginPath();
+      for (let bl = 0; bl < BPC; bl++) { const blade = cab * BPC + bl; if (blade >= L.nB || blade === b) continue; const [ox, oy] = bladeXY(cab, bl); ctx.moveTo(bc[0], bc[1]); ctx.lineTo(ox + L.bw / 2, oy + L.bh / 2); }
+      ctx.stroke();
+      // L1: hovered card → its 7 board siblings
+      ctx.strokeStyle = UB_LEVELS[1].color; ctx.shadowColor = UB_LEVELS[1].color; ctx.shadowBlur = 12; ctx.lineWidth = 2 / s; ctx.globalAlpha = 1; ctx.beginPath();
+      for (let l = 0; l < CPB; l++) { const k2 = b * CPB + l; if (k2 >= L.N1 || k2 === hk) continue; const [sx, sy] = cardXY(k2); ctx.moveTo(hc[0], hc[1]); ctx.lineTo(sx + L.cs / 2, sy + L.cs / 2); }
+      ctx.stroke();
+      ctx.restore();
+      // hovered card outline (on top, no blur)
+      ctx.lineWidth = 2.5 / s; ctx.strokeStyle = '#ffb020'; ctx.strokeRect(hx - 0.06, hy - 0.06, L.cs + 0.12, L.cs + 0.12);
+    }
     ctx.restore();
   }, [L, colorBy, links, fit, cabXY, bladeXY, cardXY, groupOf, dark]);
 
@@ -203,8 +220,10 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
       <div style={{ position: 'absolute', top: 12, left: 12, display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: 'var(--panel)', border: '1px solid var(--bd)', borderRadius: 12, boxShadow: 'var(--shadow)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
         <span style={{ fontSize: 11.5, color: 'var(--tx2)' }}>平面 · 上色</span>
         {COLOR_BTNS.map((c) => {
-          const on = colorBy === c.id;
-          return <button key={c.id} onClick={() => setColorBy(c.id)} style={{ padding: '4px 9px', fontSize: 11.5, borderRadius: 4, cursor: 'pointer', border: `1px solid ${on ? '#4369ef' : 'var(--bd)'}`, background: on ? 'rgba(67,105,239,0.10)' : 'transparent', color: on ? '#4369ef' : 'var(--tx2)' }}>{c.label}</button>;
+          const on = colorBy === c.id; const sig = PARALLEL_COLORS[c.id];
+          return <button key={c.id} onClick={() => setColorBy(c.id)} title={`按 ${c.label} 上色`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 9px', fontSize: 11.5, borderRadius: 6, cursor: 'pointer', border: `1px solid ${on ? sig : 'var(--bd)'}`, background: on ? `${sig}1f` : 'transparent', color: on ? sig : 'var(--tx2)' }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: sig, display: 'inline-block', opacity: on ? 1 : 0.6 }} />{c.label}
+          </button>;
         })}
         <button onClick={() => setLinks((v) => !v)} title="卡↔卡（L1 板载）+ 节点↔节点（L2 机柜内）连线，放大后显示"
           style={{ padding: '4px 9px', fontSize: 11.5, borderRadius: 4, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, marginLeft: 4, border: `1px solid ${links ? UB_LEVELS[1].color : 'var(--bd)'}`, background: links ? `${UB_LEVELS[1].color}22` : 'transparent', color: links ? 'var(--tx)' : 'var(--tx3)' }}>

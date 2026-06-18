@@ -16,7 +16,8 @@ import { OrbitControls, GizmoHelper, GizmoViewcube, OrthographicCamera } from '@
 import * as THREE from 'three';
 import {
   INFO, SOURCES, CHANGES, GENERATIONS, DEFAULT_GEN, UB_LEVELS, COMM_PATTERNS,
-  SCALES, DEFAULT_SCALE, TRACE_SCHED, PHASE_META, RUN_SCHED, PARTITION_META, PARTITION_PALETTE, STATUS_META, STATUS_COLORS,
+  SCALES, DEFAULT_SCALE, TRACE_SCHED, PHASE_META, RUN_SCHED, PARTITION_META, PARTITION_PALETTE, PARALLEL_COLORS, STATUS_META, STATUS_COLORS,
+  memLayers,
   type Gen, type RackKind, type ViewMode, type Scale, type RunMode, type PartitionDim,
 } from '../scene/data';
 import { TOK, FOOTNOTE } from '../content';
@@ -163,6 +164,7 @@ export function ClusterView() {
   const [ctxOpen, setCtxOpen] = useState(true);   // floating on-canvas control panel open/collapsed
   const [dark, setDark] = useState(false);   // dark / light theme
   const [camPreset, setCamPreset] = useState<CamPreset | null>(null);   // pending camera-angle snap
+  const [memOpen, setMemOpen] = useState(true);   // per-card memory occupancy panel (node view)
   const [pendingNpu, setPendingNpu] = useState<number | undefined>(undefined);   // preselect NPU's die on node drill
 
   useEffect(() => {
@@ -483,10 +485,11 @@ export function ClusterView() {
                     <div style={{ display: 'flex', gap: 4, alignItems: 'center', borderLeft: '1px solid var(--bd)', paddingLeft: narrow ? 6 : 10 }}>
                       <span style={{ fontSize: 11, color: 'var(--tx3)' }}>切分</span>
                       {(['tp', 'pp', 'dp', 'ep'] as Exclude<PartitionDim, 'none'>[]).map((d) => {
-                        const on = fpPart === d;
+                        const on = fpPart === d; const sig = PARALLEL_COLORS[d];
                         return (
                           <button key={d} onClick={() => setFpPart((p) => (p === d ? 'none' : d))} title={`${PARTITION_META[d].label} · ${PARTITION_META[d].level}`}
-                            style={{ padding: '4px 10px', fontSize: 11.5, borderRadius: 6, cursor: 'pointer', border: `1px solid ${on ? '#4369ef' : 'var(--bd)'}`, background: on ? 'rgba(67,105,239,0.10)' : 'transparent', color: on ? '#4369ef' : 'var(--tx2)' }}>{d.toUpperCase()}</button>
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: 11.5, borderRadius: 6, cursor: 'pointer', border: `1px solid ${on ? sig : 'var(--bd)'}`, background: on ? `${sig}1f` : 'transparent', color: on ? sig : 'var(--tx2)' }}>
+                            <span style={{ width: 8, height: 8, borderRadius: 2, background: sig, display: 'inline-block', opacity: on ? 1 : 0.55 }} />{d.toUpperCase()}</button>
                         );
                       })}
                     </div>
@@ -645,6 +648,33 @@ export function ClusterView() {
               background: 'var(--panel)', border: '1px solid var(--bd)', borderRadius: 10, boxShadow: 'var(--shadow-sm)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
               color: 'var(--tx)', pointerEvents: 'none',
             }}>{hoverInfo}</div>
+          )}
+
+          {/* per-card memory occupancy — bridges topology → on-chip (where a rank's bytes live) */}
+          {mode === 'node' && nodeKind === 'compute' && (
+            <div style={{
+              position: 'absolute', right: 14, top: 14, width: 232, padding: '9px 12px', fontSize: 11.5,
+              background: 'var(--panel)', border: '1px solid var(--bd)', borderRadius: 10, boxShadow: 'var(--shadow-sm)',
+              backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', color: 'var(--tx2)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: memOpen ? 7 : 0 }}>
+                <span style={{ fontWeight: 600, color: 'var(--tx)' }}>单卡内存占用 · 1 NPU</span>
+                <button onClick={() => setMemOpen((v) => !v)} style={{ padding: '1px 7px', fontSize: 11, borderRadius: 6, cursor: 'pointer', border: '1px solid var(--bd)', background: 'transparent', color: 'var(--tx2)' }}>{memOpen ? '▾' : '▸'}</button>
+              </div>
+              {memOpen && memLayers(spec).map((m) => (
+                <div key={m.id} title={m.note} style={{ marginBottom: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5, marginBottom: 2 }}>
+                    <span style={{ color: 'var(--tx)' }}>{m.name}</span>
+                    <span style={{ color: 'var(--tx3)' }}>{`${m.cap} · ${Math.round(m.util * 100)}%`}</span>
+                  </div>
+                  {/* PTO 14%-fill / 34%-stroke track + util fill */}
+                  <div style={{ position: 'relative', height: 7, borderRadius: 4, background: `${m.color}24`, border: `1px solid ${m.color}57`, overflow: 'hidden' }}>
+                    <div style={{ position: 'absolute', inset: 0, width: `${Math.round(m.util * 100)}%`, background: m.color, opacity: 0.82 }} />
+                  </div>
+                </div>
+              ))}
+              {memOpen && <div style={{ fontSize: 10, color: 'var(--tx3)', marginTop: 2 }}>示意占用 · 越贴近算力越易成瓶颈</div>}
+            </div>
           )}
 
           {/* legend: UB hierarchy levels (+ comm overlays in node view) */}
