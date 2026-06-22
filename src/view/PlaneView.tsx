@@ -76,34 +76,28 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
   const LAY = (() => {
     const N = spec.totalNpus;
     const nCabTot = Math.ceil(N / 64), nNodeTot = Math.ceil(N / CPB);
-    const C = Math.min(3, nCabTot), Bd = 2, Cd = CPB, Th = THREADS;   // sampled fan-out
-    const thStep = 0.62, cardGap = 0.5, nodeGap = 1.7, cabGap = 3.2, margin = 8, bandH = 2.7, boxH = 0.8;
-    const avg = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
-    type B = { cx: number; parent: number };
-    const cab: B[] = [], node: B[] = [], card: B[] = [], proc: B[] = [], thr: B[] = [];
-    let x = margin;
-    for (let c = 0; c < C; c++) {
-      const cabNodes: number[] = [];
-      for (let b = 0; b < Bd; b++) {
-        const nodeCards: number[] = [];
-        for (let k = 0; k < Cd; k++) {
-          const procId = proc.length, cardId = card.length, tStart = x;
-          for (let t = 0; t < Th; t++) { thr.push({ cx: x, parent: procId }); x += thStep; }
-          const pcx = (tStart + x - thStep) / 2;
-          proc.push({ cx: pcx, parent: cardId });
-          card.push({ cx: pcx, parent: node.length });
-          nodeCards.push(cardId); x += cardGap;
-        }
-        x += nodeGap;
-        node.push({ cx: avg(nodeCards.map((i) => card[i].cx)), parent: cab.length });
-        cabNodes.push(node.length - 1);
-      }
-      x += cabGap;
-      cab.push({ cx: avg(cabNodes.map((i) => node[i].cx)), parent: 0 });
-    }
-    const sup: B[] = [{ cx: avg(cab.map((c) => c.cx)), parent: -1 }];
+    const C = Math.min(4, nCabTot), Bd = 2, Cd = CPB, Th = THREADS;   // sampled fan-out
+    // icicle subdivision: every level fills the SAME fixed width Wc (just divided
+    // finer) → the diagram never grows horizontally with the super-node count.
+    const margin = 9.5, Wc = 50, bandH = 3.0, boxH = 1.0;
+    type S = { x0: number; x1: number; cx: number; parent: number };
+    const mk = (x0: number, x1: number, parent: number): S => ({ x0, x1, cx: (x0 + x1) / 2, parent });
+    const divide = (parents: S[], n: number, gf: number): S[] => {
+      const out: S[] = [];
+      parents.forEach((p, pi) => {
+        const w = p.x1 - p.x0, g = w * gf, cw = (w - g * (n + 1)) / n;
+        for (let k = 0; k < n; k++) { const a = p.x0 + g + k * (cw + g); out.push(mk(a, a + cw, pi)); }
+      });
+      return out;
+    };
+    const sup = [mk(margin, margin + Wc, -1)];
+    const cab = divide(sup, C, 0.05);
+    const node = divide(cab, Bd, 0.10);
+    const card = divide(node, Cd, 0.07);
+    const proc = card.map((c, i) => mk(c.x0, c.x1, i));   // 1 rank : 1 card
+    const thr = divide(proc, Th, 0.16);
     const y = [0, 1, 2, 3, 4, 5].map((i) => boxH + i * bandH);
-    return { sup, cab, node, card, proc, thr, boxH, y, w: x + margin, h: boxH * 2 + bandH * 5,
+    return { sup, cab, node, card, proc, thr, boxH, y, w: margin + Wc + margin, h: boxH * 2 + bandH * 5,
       counts: { sup: 1, cab: nCabTot, node: nNodeTot, card: N, proc: N, thr: N * Th }, sample: { Bd, Cd, Th, C } };
   })();
 
@@ -138,46 +132,67 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
     ctx.fillStyle = P.bg; ctx.fillRect(0, 0, W, H);
     ctx.save(); ctx.translate(tx, ty); ctx.scale(s, s);
 
-    // ── layered-hierarchy layout (bands + containment + peer mesh) ──
+    // ── layered-hierarchy view: icicle bands + glyphs + two distinct edge channels ──
     if (layout === 'layers') {
-      const half = LAY.boxH / 2;
-      const Lv = [
-        { boxes: LAY.sup,  color: UB_LEVELS[3].color, label: 'L3 超节点', count: LAY.counts.sup,  bw: 1.9 },
-        { boxes: LAY.cab,  color: UB_LEVELS[2].color, label: 'L2 机柜',   count: LAY.counts.cab,  bw: 1.35 },
-        { boxes: LAY.node, color: UB_LEVELS[1].color, label: 'L1 节点',   count: LAY.counts.node, bw: 1.05 },
-        { boxes: LAY.card, color: UB_LEVELS[0].color, label: 'L0 卡',     count: LAY.counts.card, bw: 0.82 },
-        { boxes: LAY.proc, color: '#4369ef',          label: '进程 rank', count: LAY.counts.proc, bw: 0.7 },
-        { boxes: LAY.thr,  color: COMM_PATTERNS[2].color, label: '线程',  count: LAY.counts.thr,  bw: 0.42 },
+      type Slc = { x0: number; x1: number; cx: number; parent: number };
+      const half = LAY.boxH / 2, yOf = (i: number) => LAY.y[i];
+      const Lv: { kind: string; boxes: Slc[]; color: string; label: string; count: number }[] = [
+        { kind: 'super', boxes: LAY.sup,  color: UB_LEVELS[3].color,    label: 'L3 超节点', count: LAY.counts.sup },
+        { kind: 'cab',   boxes: LAY.cab,  color: UB_LEVELS[2].color,    label: 'L2 机柜',   count: LAY.counts.cab },
+        { kind: 'node',  boxes: LAY.node, color: UB_LEVELS[1].color,    label: 'L1 节点',   count: LAY.counts.node },
+        { kind: 'card',  boxes: LAY.card, color: UB_LEVELS[0].color,    label: 'L0 卡',     count: LAY.counts.card },
+        { kind: 'proc',  boxes: LAY.proc, color: '#4369ef',            label: '进程 rank', count: LAY.counts.proc },
+        { kind: 'thread',boxes: LAY.thr,  color: COMM_PATTERNS[2].color,label: '线程',     count: LAY.counts.thr },
       ];
-      const yOf = (i: number) => LAY.y[i];
-      // 层级间：containment edges (parent band → child band)
-      ctx.strokeStyle = P.cardBd; ctx.globalAlpha = 0.55; ctx.lineWidth = 0.6 / s; ctx.beginPath();
+      const rr = (x: number, y: number, w: number, h: number, r: number) => {
+        const rad = Math.min(r, w / 2, h / 2);
+        ctx.beginPath(); ctx.moveTo(x + rad, y);
+        ctx.arcTo(x + w, y, x + w, y + h, rad); ctx.arcTo(x + w, y + h, x, y + h, rad);
+        ctx.arcTo(x, y + h, x, y, rad); ctx.arcTo(x, y, x + w, y, rad); ctx.closePath();
+      };
+      // ── 层级间 (between levels): NEUTRAL grey containment fan — parent ⊃ children ──
+      ctx.strokeStyle = P.cardBd; ctx.globalAlpha = 0.5; ctx.lineWidth = 0.5 / s; ctx.beginPath();
       for (let i = 1; i < 6; i++) for (const c of Lv[i].boxes) { const p = Lv[i - 1].boxes[c.parent]; if (!p) continue; ctx.moveTo(p.cx, yOf(i - 1) + half); ctx.lineTo(c.cx, yOf(i) - half); }
       ctx.stroke(); ctx.globalAlpha = 1;
-      // 层级内：peer mesh as arcs bowing above each band (group = same parent)
-      const peer = (li: number, color: string, alpha: number, lw: number) => {
-        const boxes = Lv[li].boxes, yy = yOf(li); const g = new Map<number, { cx: number }[]>();
+
+      // ── 层级内 (within a level): COLORED arc per sibling group = same-level UB mesh ──
+      const peer = (li: number, color: string, alpha: number) => {
+        const boxes = Lv[li].boxes, yy = yOf(li) - half; const g = new Map<number, Slc[]>();
         boxes.forEach((b) => { const a = g.get(b.parent) ?? []; a.push(b); g.set(b.parent, a); });
-        ctx.strokeStyle = color; ctx.globalAlpha = alpha; ctx.lineWidth = lw / s; ctx.lineCap = 'round'; ctx.beginPath();
-        g.forEach((arr) => { for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) { const x1 = arr[i].cx, x2 = arr[j].cx, mx = (x1 + x2) / 2; ctx.moveTo(x1, yy - half); ctx.quadraticCurveTo(mx, yy - half - LAY.boxH * 0.5 - Math.abs(x2 - x1) * 0.16, x2, yy - half); } });
+        ctx.strokeStyle = color; ctx.globalAlpha = alpha; ctx.lineWidth = 1.1 / s; ctx.lineCap = 'round'; ctx.beginPath();
+        g.forEach((arr) => {
+          if (arr.length < 2) return;
+          const x1 = arr[0].cx, x2 = arr[arr.length - 1].cx, bow = yy - 0.35 - Math.min(1.4, (x2 - x1) * 0.18);
+          ctx.moveTo(x1, yy); ctx.quadraticCurveTo((x1 + x2) / 2, bow, x2, yy);                 // bracket spanning the group
+          for (const b of arr) { ctx.moveTo(b.cx, yy); ctx.lineTo(b.cx, yy - 0.18); }            // ticks down to each sibling
+        });
         ctx.stroke(); ctx.globalAlpha = 1;
       };
-      peer(1, UB_LEVELS[3].color, 0.5, 1.0);    // 机柜↔机柜 (L3 Clos)
-      peer(2, UB_LEVELS[2].color, 0.5, 0.9);    // 节点↔节点 (L2 柜内)
-      peer(3, UB_LEVELS[1].color, 0.45, 0.7);   // 卡↔卡 (L1 板载 full-mesh)
-      peer(5, COMM_PATTERNS[2].color, 0.4, 0.5); // 线程↔线程 (核间)
-      // boxes + per-band labels (label colour = level colour)
+      peer(1, UB_LEVELS[3].color, 0.85);   // 机柜↔机柜 · L3 Clos
+      peer(2, UB_LEVELS[2].color, 0.85);   // 节点↔节点 · L2 柜内 full-mesh
+      peer(3, UB_LEVELS[1].color, 0.8);    // 卡↔卡 · L1 板载 full-mesh
+      peer(5, COMM_PATTERNS[2].color, 0.6); // 线程 · 核间
+
+      // ── glyphs per level (each entity drawn as itself, not a generic box) ──
       ctx.lineCap = 'butt';
       Lv.forEach((lv, li) => {
-        const yy = yOf(li);
+        const yy = yOf(li), col = lv.color;
         lv.boxes.forEach((b) => {
-          ctx.fillStyle = lv.color; ctx.globalAlpha = 0.2; ctx.fillRect(b.cx - lv.bw / 2, yy - half, lv.bw, LAY.boxH);
-          ctx.globalAlpha = 1; ctx.strokeStyle = lv.color; ctx.lineWidth = 0.5 / s; ctx.strokeRect(b.cx - lv.bw / 2, yy - half, lv.bw, LAY.boxH);
+          const w = Math.min(b.x1 - b.x0, 3.2) * 0.9, gw = b.x0 + (b.x1 - b.x0 - w) / 2;   // centred, capped
+          const x = gw, top = yy - half, h = LAY.boxH, cx = b.cx;
+          ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = Math.max(0.5, 1) / s;
+          if (lv.kind === 'super') { ctx.globalAlpha = 0.16; rr(x, top, w, h, 0.18); ctx.fill(); ctx.globalAlpha = 1; ctx.stroke(); ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '0.6px sans-serif'; ctx.fillText(TOK.supernode, cx, yy); }
+          else if (lv.kind === 'cab') { ctx.globalAlpha = 0.14; rr(x, top, w, h, 0.12); ctx.fill(); ctx.globalAlpha = 1; ctx.stroke(); ctx.globalAlpha = 0.55; ctx.lineWidth = 0.4 / s; for (let r = 1; r < 4; r++) { const yk = top + (h * r) / 4; ctx.beginPath(); ctx.moveTo(x + w * 0.14, yk); ctx.lineTo(x + w * 0.86, yk); ctx.stroke(); } ctx.globalAlpha = 1; }   // cabinet slats
+          else if (lv.kind === 'node') { ctx.globalAlpha = 0.13; rr(x, top + h * 0.3, w, h * 0.4, 0.07); ctx.fill(); ctx.globalAlpha = 1; ctx.stroke(); ctx.globalAlpha = 0.9; for (let d = 0; d < 8; d++) { const dx = x + w * (0.1 + 0.8 * (d / 7)); ctx.beginPath(); ctx.arc(dx, yy, Math.min(0.07, w * 0.04), 0, 7); ctx.fill(); } ctx.globalAlpha = 1; }   // blade w/ 8 NPU dots
+          else if (lv.kind === 'card') { ctx.globalAlpha = 0.18; rr(x, top + h * 0.18, w, h * 0.64, 0.05); ctx.fill(); ctx.globalAlpha = 1; ctx.stroke(); const ix = x + w * 0.3, iy = top + h * 0.34, iw = w * 0.4, ih = h * 0.32; ctx.globalAlpha = 0.5; ctx.fillRect(ix, iy, iw, ih); ctx.globalAlpha = 1; }   // chip w/ die
+          else if (lv.kind === 'proc') { ctx.globalAlpha = 0.85; ctx.beginPath(); ctx.arc(cx, yy, Math.min(h * 0.32, (b.x1 - b.x0) * 0.34), 0, 7); ctx.fill(); ctx.globalAlpha = 1; }   // rank = dot
+          else { ctx.globalAlpha = 0.9; const tw2 = Math.min(0.16, (b.x1 - b.x0) * 0.32); ctx.beginPath(); ctx.moveTo(cx, yy - h * 0.28); ctx.lineTo(cx - tw2, yy + h * 0.18); ctx.lineTo(cx + tw2, yy + h * 0.18); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1; }   // thread = tick
         });
-        ctx.fillStyle = lv.color; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.font = '0.62px sans-serif';
-        ctx.fillText(lv.label, 7.2, yy - 0.18);
-        ctx.fillStyle = P.ink2; ctx.font = '0.4px sans-serif';
-        ctx.fillText(`×${lv.count.toLocaleString()}`, 7.2, yy + 0.34);
+        // per-band label (level colour) + real total count
+        ctx.fillStyle = col; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic'; ctx.font = '0.66px sans-serif';
+        ctx.fillText(lv.label, 8.8, yy - 0.05);
+        ctx.fillStyle = P.ink2; ctx.font = '0.42px sans-serif';
+        ctx.fillText(`×${lv.count.toLocaleString()}`, 8.8, yy + 0.6);
       });
       ctx.restore();
       return;
