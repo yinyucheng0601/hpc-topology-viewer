@@ -72,36 +72,36 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
   };
   const cfg = `TP${CPB}×PP${L.PP}×DP${Math.max(1, Math.round(L.nB / L.PP))}`;
 
-  // ── layered-hierarchy layout (world units): the same levels as the 3-D topology
-  // (线程→进程→L0卡→L1节点→L2机柜→L3超节点) flattened to stacked bands, with a bounded,
-  // count-labelled representative fan-out so containment (层级间) + peer mesh (层级内) read. ──
+  // ── layered-hierarchy layout: each level is MATRIX-PACKED into a square-ish grid
+  // (like the top view), the grids stacked top→bottom by level. Formula-based (no
+  // per-unit arrays) so the full pod — incl. 16K Die / ~300K AI Core — costs nothing.
+  // Levels: 超节点 → 机柜 → 节点 → NPU(=rank=device, strict 1:1) → Die(×2) → AI Core. ──
   const LAY = useMemo(() => {
-    const N = spec.totalNpus;
-    const nCab = Math.max(1, Math.round(N / 64)), Bd = 8, Cd = CPB, Th = THREADS;   // FULL fan-out: 8 nodes/cab · 8 cards/node · 3 thr/rank
-    // icicle subdivision: every level fills the SAME fixed width Wc (just divided
-    // finer) → the full super-node fits without ever growing horizontally.
-    const margin = 9.5, Wc = 52, bandH = 3.0, boxH = 1.0;
-    type S = { x0: number; x1: number; cx: number; parent: number };
-    const mk = (x0: number, x1: number, parent: number): S => ({ x0, x1, cx: (x0 + x1) / 2, parent });
-    const divide = (parents: S[], n: number): S[] => {
-      const gf = n >= 24 ? 0.008 : n >= 8 ? 0.05 : 0.09, out: S[] = [];
-      parents.forEach((p, pi) => {
-        const w = p.x1 - p.x0, g = w * gf, cw = (w - g * (n + 1)) / n;
-        for (let k = 0; k < n; k++) { const a = p.x0 + g + k * (cw + g); out.push(mk(a, a + cw, pi)); }
-      });
-      return out;
-    };
-    const sup = [mk(margin, margin + Wc, -1)];
-    const cab = divide(sup, nCab);
-    const node = divide(cab, Bd);
-    const card = divide(node, Cd);
-    const proc = card.map((c, i) => mk(c.x0, c.x1, i));   // 1 rank : 1 card
-    const thr = divide(proc, Th);
-    const y = [0, 1, 2, 3, 4, 5].map((i) => boxH + i * bandH);
-    return { sup, cab, node, card, proc, thr, boxH, y, margin, Wc, w: margin + Wc + margin, h: boxH * 2 + bandH * 5,
-      grp: { cab: nCab, node: Bd, card: Cd, proc: 1, thr: Th },   // children-per-parent at each level
-      counts: { sup: 1, cab: nCab, node: nCab * Bd, card: N, proc: N, thr: N * Th } };
+    const N = spec.totalNpus, nCab = Math.max(1, Math.round(N / 64)), coresPer = spec.aiSubsys ?? 32;
+    const margin = 9.5, Wc = 64, gap = 1.8, AR = 5.4;   // AR keeps every panel ≈ Wc/AR tall
+    const defs = [
+      { kind: 'super', count: 1,            color: UB_LEVELS[3].color, label: 'L3 超节点' },
+      { kind: 'cab',   count: nCab,          color: UB_LEVELS[2].color, label: 'L2 机柜' },
+      { kind: 'node',  count: nCab * 8,      color: UB_LEVELS[1].color, label: 'L1 节点/刀片' },
+      { kind: 'npu',   count: N,             color: '#4369ef',          label: 'NPU=rank=device' },
+      { kind: 'die',   count: N * 2,         color: UB_LEVELS[0].color, label: 'Die (×2/NPU)' },
+      { kind: 'core',  count: N * coresPer,  color: COMM_PATTERNS[2].color, label: 'AI Core' },
+    ];
+    let y = margin;
+    const levels = defs.map((d, li) => {
+      const cols = Math.max(1, Math.round(Math.sqrt(d.count * AR)));
+      const cell = Wc / cols, rows = Math.ceil(d.count / cols), h = rows * cell, y0 = y;
+      y += h + gap;
+      return { ...d, cols, cell, rows, y0, h, grp: li === 0 ? 1 : d.count / defs[li - 1].count };   // grp = children per parent
+    });
+    return { levels, margin, Wc, w: margin * 2 + Wc, h: y - gap + margin };
   }, [spec]);
+
+  // formula cell centre (level li, unit index i) — no stored arrays
+  const cellXY = (li: number, i: number): [number, number] => {
+    const Lv = LAY.levels[li]; const c = i % Lv.cols, r = Math.floor(i / Lv.cols);
+    return [LAY.margin + (c + 0.5) * Lv.cell, Lv.y0 + (r + 0.5) * Lv.cell];
+  };
 
   const ext = layout === 'layers' ? { tw: LAY.w, th: LAY.h } : { tw: L.tw, th: L.th };
   const fit = useCallback((W: number, H: number) => Math.min(W / ext.tw, H / ext.th) * 0.92, [ext.tw, ext.th]);
@@ -123,27 +123,25 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
     return k < L.N1 ? k : null;
   };
 
-  // layered view: hit-test world point → { level, slice index }
-  const layArrs = () => [LAY.sup, LAY.cab, LAY.node, LAY.card, LAY.proc, LAY.thr];
+  // layered view: hit-test world point → { level, grid cell index }
   const pickLayer = (wx: number, wy: number): { lvl: number; idx: number } | null => {
-    const arrs = layArrs();
-    for (let li = 0; li < 6; li++) {
-      if (Math.abs(wy - LAY.y[li]) > LAY.boxH * 0.75) continue;
-      const idx = arrs[li].findIndex((b) => wx >= b.x0 && wx <= b.x1);
-      if (idx >= 0) return { lvl: li, idx };
+    for (let li = 0; li < LAY.levels.length; li++) {
+      const Lv = LAY.levels[li]; if (wy < Lv.y0 || wy > Lv.y0 + Lv.h) continue;
+      const c = Math.floor((wx - LAY.margin) / Lv.cell), r = Math.floor((wy - Lv.y0) / Lv.cell);
+      if (c < 0 || c >= Lv.cols) return null;
+      const idx = r * Lv.cols + c;
+      if (idx >= 0 && idx < Lv.count) return { lvl: li, idx };
     }
     return null;
   };
-  // Selected up/down-stream chain as a CONTIGUOUS [lo,hi) range per level (the icicle
-  // is ordered, so a node's ancestors/descendants are contiguous) → O(1), no per-frame
-  // iteration over the 24 K threads.
+  // Selected up/down-stream chain as a CONTIGUOUS [lo,hi) index range per level
+  // (hierarchy is index-ordered, so ancestors/descendants are contiguous) → O(levels).
   const layRange = (): { lo: number[]; hi: number[] } | null => {
     if (!selL) return null;
-    const cp = [LAY.grp.cab, LAY.grp.node, LAY.grp.card, LAY.grp.proc, LAY.grp.thr];   // children-per-parent at transition l→l+1
-    const lo = [0, 0, 0, 0, 0, 0], hi = [1, 1, 1, 1, 1, 1];
+    const n = LAY.levels.length, lo = Array(n).fill(0), hi = Array(n).fill(1);
     lo[selL.lvl] = selL.idx; hi[selL.lvl] = selL.idx + 1;
-    for (let l = selL.lvl; l > 0; l--) { lo[l - 1] = Math.floor(lo[l] / cp[l - 1]); hi[l - 1] = lo[l - 1] + 1; }   // ancestors
-    for (let l = selL.lvl; l < 5; l++) { lo[l + 1] = lo[l] * cp[l]; hi[l + 1] = hi[l] * cp[l]; }                   // descendants
+    for (let l = selL.lvl; l > 0; l--) { lo[l - 1] = Math.floor(lo[l] / LAY.levels[l].grp); hi[l - 1] = lo[l - 1] + 1; }
+    for (let l = selL.lvl; l < n - 1; l++) { lo[l + 1] = lo[l] * LAY.levels[l + 1].grp; hi[l + 1] = hi[l] * LAY.levels[l + 1].grp; }
     return { lo, hi };
   };
 
@@ -159,20 +157,11 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
     ctx.fillStyle = P.bg; ctx.fillRect(0, 0, W, H);
     ctx.save(); ctx.translate(tx, ty); ctx.scale(s, s);
 
-    // ── layered-hierarchy view: full super-node, icicle bands with level-of-detail ──
+    // ── layered-hierarchy view: each level matrix-packed into a grid (like the top
+    //    view), grids stacked by level. Full pod via LOD: cells when zoomed in, an
+    //    aggregate fill when too small. Click → highlight the up/down-stream chain. ──
     if (layout === 'layers') {
-      type Slc = { x0: number; x1: number; cx: number; parent: number };
-      const half = LAY.boxH / 2, yOf = (i: number) => LAY.y[i], { margin, Wc } = LAY;
-      const arrs: Slc[][] = [LAY.sup, LAY.cab, LAY.node, LAY.card, LAY.proc, LAY.thr];
-      const meta = [
-        { kind: 'super', color: UB_LEVELS[3].color, label: 'L3 超节点' },
-        { kind: 'cab',   color: UB_LEVELS[2].color, label: 'L2 机柜' },
-        { kind: 'node',  color: UB_LEVELS[1].color, label: 'L1 节点' },
-        { kind: 'card',  color: UB_LEVELS[0].color, label: 'L0 卡' },
-        { kind: 'proc',  color: '#4369ef',         label: '进程 rank' },
-        { kind: 'thread',color: COMM_PATTERNS[2].color, label: '线程' },
-      ];
-      const counts = [LAY.counts.sup, LAY.counts.cab, LAY.counts.node, LAY.counts.card, LAY.counts.proc, LAY.counts.thr];
+      const { levels, margin, Wc } = LAY;
       const rr = (x: number, y: number, w: number, h: number, r: number) => {
         const rad = Math.min(r, w / 2, h / 2);
         ctx.beginPath(); ctx.moveTo(x + rad, y);
@@ -180,79 +169,56 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
         ctx.arcTo(x, y + h, x, y, rad); ctx.arcTo(x, y, x + w, y, rad); ctx.closePath();
       };
       const hi = layRange();
-      const lit = (li: number, idx: number) => !hi || (idx >= hi.lo[li] && idx < hi.hi[li]);
-      const vx0 = -tx / s, vx1 = (W - tx) / s;
-      const stepPx = (li: number) => (Wc / counts[li]) * s;          // avg slice width in screen px
-      const glyphLOD = (li: number) => stepPx(li) >= 7;              // wide enough to draw individual glyphs
-      const visRange = (li: number): [number, number] => { const c = counts[li]; return [Math.max(0, Math.floor((vx0 - margin) / Wc * c) - 1), Math.min(c, Math.ceil((vx1 - margin) / Wc * c) + 1)]; };
+      const vx0 = -tx / s, vx1 = (W - tx) / s, vy0 = -ty / s, vy1 = (H - ty) / s;
 
-      // single-entity glyph (each level drawn as itself)
-      const glyph = (kind: string, b: Slc, yy: number, col: string, A: number) => {
-        const w = Math.min(b.x1 - b.x0, 3.2) * 0.9, x = b.x0 + (b.x1 - b.x0 - w) / 2, top = yy - half, h = LAY.boxH, cx = b.cx;
-        ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = (hi && A === 1 ? 1.4 : 1) / s;
-        if (kind === 'super') { ctx.globalAlpha = 0.16 * A; rr(x, top, w, h, 0.18); ctx.fill(); ctx.globalAlpha = A; ctx.stroke(); ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '0.6px sans-serif'; ctx.fillText(TOK.supernode, cx, yy); }
-        else if (kind === 'cab') { ctx.globalAlpha = 0.14 * A; rr(x, top, w, h, 0.12); ctx.fill(); ctx.globalAlpha = A; ctx.stroke(); ctx.globalAlpha = 0.55 * A; ctx.lineWidth = 0.4 / s; for (let r = 1; r < 4; r++) { const yk = top + (h * r) / 4; ctx.beginPath(); ctx.moveTo(x + w * 0.14, yk); ctx.lineTo(x + w * 0.86, yk); ctx.stroke(); } ctx.globalAlpha = 1; }
-        else if (kind === 'node') { ctx.globalAlpha = 0.13 * A; rr(x, top + h * 0.3, w, h * 0.4, 0.07); ctx.fill(); ctx.globalAlpha = A; ctx.stroke(); ctx.globalAlpha = 0.9 * A; for (let d = 0; d < 8; d++) { const dx = x + w * (0.1 + 0.8 * (d / 7)); ctx.beginPath(); ctx.arc(dx, yy, Math.min(0.07, w * 0.04), 0, 7); ctx.fill(); } ctx.globalAlpha = 1; }
-        else if (kind === 'card') { ctx.globalAlpha = 0.18 * A; rr(x, top + h * 0.18, w, h * 0.64, 0.05); ctx.fill(); ctx.globalAlpha = A; ctx.stroke(); ctx.globalAlpha = 0.5 * A; ctx.fillRect(x + w * 0.3, top + h * 0.34, w * 0.4, h * 0.32); ctx.globalAlpha = 1; }
-        else if (kind === 'proc') { ctx.globalAlpha = 0.9 * A; ctx.beginPath(); ctx.arc(cx, yy, Math.min(h * 0.3, (b.x1 - b.x0) * 0.32), 0, 7); ctx.fill(); ctx.globalAlpha = 1; }
-        else { ctx.globalAlpha = 0.85 * A; const bw2 = Math.min(0.16, (b.x1 - b.x0) * 0.42); rr(cx - bw2 / 2, yy - h * 0.24, bw2, h * 0.44, bw2 * 0.4); ctx.fill(); ctx.globalAlpha = 1; }
-      };
+      levels.forEach((Lv, li) => {
+        const cellPx = Lv.cell * s, pad = Lv.cell * 0.14;
+        // visible cell window (cull to viewport)
+        const c0 = Math.max(0, Math.floor((vx0 - margin) / Lv.cell)), c1 = Math.min(Lv.cols, Math.ceil((vx1 - margin) / Lv.cell));
+        const r0 = Math.max(0, Math.floor((vy0 - Lv.y0) / Lv.cell)), r1 = Math.min(Lv.rows, Math.ceil((vy1 - Lv.y0) / Lv.cell));
+        if (cellPx >= 3 && Lv.y0 < vy1 && Lv.y0 + Lv.h > vy0) {
+          // individual matrix cells (culled)
+          for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) {
+            const i = r * Lv.cols + c; if (i >= Lv.count) break;
+            const on = !hi || (i >= hi.lo[li] && i < hi.hi[li]);
+            const x = margin + c * Lv.cell + pad, y = Lv.y0 + r * Lv.cell + pad, ws = Lv.cell - pad * 2;
+            ctx.fillStyle = hi ? (on ? '#ffb020' : Lv.color) : Lv.color; ctx.globalAlpha = hi ? (on ? 0.95 : 0.12) : 0.82;
+            rr(x, y, ws, ws, Math.min(0.1, ws * 0.22)); ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+        } else if (Lv.y0 < vy1 && Lv.y0 + Lv.h > vy0) {
+          // aggregate: one fill over the whole grid panel (represents all units)
+          ctx.fillStyle = Lv.color; ctx.globalAlpha = hi ? 0.08 : 0.5; rr(margin, Lv.y0, Wc, Lv.h, 0.2); ctx.fill(); ctx.globalAlpha = 1;
+          if (hi) {   // selected range = a contiguous bright block (rows lo..hi)
+            const ra = Math.floor(hi.lo[li] / Lv.cols), rb = Math.floor((hi.hi[li] - 1) / Lv.cols);
+            ctx.fillStyle = '#ffb020'; ctx.globalAlpha = 0.85;
+            if (ra === rb) { const x = margin + (hi.lo[li] % Lv.cols) * Lv.cell; rr(x, Lv.y0 + ra * Lv.cell, (hi.hi[li] - hi.lo[li]) * Lv.cell, Lv.cell, 0.06); ctx.fill(); }
+            else { rr(margin, Lv.y0 + ra * Lv.cell, Wc, (rb - ra + 1) * Lv.cell, 0.06); ctx.fill(); }
+            ctx.globalAlpha = 1;
+          }
+        }
+      });
 
-      // ── 层级间 (between levels): grey containment lines, only where children resolve (culled) ──
-      if (!hi) for (let i = 1; i < 6; i++) {
-        if (!glyphLOD(i)) continue;
-        const [i0, i1] = visRange(i);
-        ctx.strokeStyle = P.cardBd; ctx.globalAlpha = 0.4; ctx.lineWidth = 0.4 / s;
-        for (let ci = i0; ci < i1; ci++) { const c = arrs[i][ci], p = arrs[i - 1][c.parent]; if (!p) continue; ctx.beginPath(); ctx.moveTo(p.cx, yOf(i - 1) + half); ctx.lineTo(c.cx, yOf(i) - half); ctx.stroke(); }
-      }
-      // selected: amber up-stream chain only (selL → super), a few lines; downstream shown via bright bands
-      if (hi) { ctx.strokeStyle = '#ffb020'; ctx.globalAlpha = 0.95; ctx.lineWidth = 0.9 / s; for (let i = 1; i <= selL!.lvl; i++) { const p = arrs[i - 1][hi.lo[i - 1]], c = arrs[i][hi.lo[i]]; ctx.beginPath(); ctx.moveTo(p.cx, yOf(i - 1) + half); ctx.lineTo(c.cx, yOf(i) - half); ctx.stroke(); } }
-      ctx.globalAlpha = 1;
-
-      // ── 层级内 (within a level): colored arc per sibling group; only when resolved (culled) ──
-      const peer = (li: number, gsz: number, color: string, baseA: number, side: number) => {
-        if (gsz < 2 || (!glyphLOD(li) && !hi)) return;
-        const yEdge = yOf(li) + side * half, c = counts[li], nG = Math.ceil(c / gsz);
-        const g0 = Math.max(0, Math.floor((vx0 - margin) / Wc * c / gsz) - 1), g1 = Math.min(nG, Math.ceil((vx1 - margin) / Wc * c / gsz) + 1);
-        ctx.lineCap = 'round';
-        for (let g = g0; g < g1; g++) {
-          const a0 = arrs[li][g * gsz], a1 = arrs[li][Math.min(c - 1, g * gsz + gsz - 1)]; if (!a0 || !a1) continue;
-          const on = !hi || (g * gsz >= hi.lo[li] && g * gsz < hi.hi[li]);
-          if (hi && !on) continue;
-          ctx.strokeStyle = color; ctx.globalAlpha = baseA; ctx.lineWidth = 1.1 / s;
-          const x1 = a0.cx, x2 = a1.cx, bow = yEdge + side * (0.32 + Math.min(1.1, (x2 - x1) * 0.14));
-          ctx.beginPath(); ctx.moveTo(x1, yEdge); ctx.quadraticCurveTo((x1 + x2) / 2, bow, x2, yEdge); ctx.stroke();
+      // ── containment links for the selected chain (parent cell → child block centre) ──
+      if (hi) {
+        ctx.strokeStyle = '#ffb020'; ctx.globalAlpha = 0.9; ctx.lineWidth = 0.12; ctx.lineCap = 'round';
+        for (let li = 1; li < levels.length; li++) {
+          const pa = cellXY(li - 1, hi.lo[li - 1]);                                  // parent cell
+          const ca = cellXY(li, hi.lo[li]), cb = cellXY(li, Math.min(levels[li].count - 1, hi.hi[li] - 1));
+          ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo((ca[0] + cb[0]) / 2, (ca[1] + cb[1]) / 2); ctx.stroke();
         }
         ctx.globalAlpha = 1;
-      };
-      peer(1, LAY.grp.cab, UB_LEVELS[3].color, 0.8, -1);     // 机柜↔机柜 · L3 Clos
-      peer(2, LAY.grp.node, UB_LEVELS[2].color, 0.8, -1);    // 节点↔节点 · L2 柜内
-      peer(3, LAY.grp.card, UB_LEVELS[1].color, 0.78, -1);   // 卡↔卡 · L1 板载 full-mesh
-      peer(4, LAY.grp.card, COMM_PATTERNS[0].color, 0.7, 1); // rank↔rank · 进程级集合通信 (TP 域, 下侧)
+      }
 
-      // ── levels: detailed glyphs when zoomed in; else EVERY real unit as a batched
-      //    mark (no solid "band" — you see all 8192/24576 individuals, culled to view) ──
-      ctx.lineCap = 'butt';
-      const markSet = (li: number, m0: number, m1: number) => {   // one batched path over a slice range
-        if (m1 <= m0) return; const arr = arrs[li], top = yOf(li) - half, tick = li >= 4;
-        ctx.beginPath();
-        for (let i = m0; i < m1; i++) { const b = arr[i], w = Math.max((b.x1 - b.x0) * (tick ? 0.5 : 0.82), 0.0008); ctx.rect(b.x0 + (b.x1 - b.x0 - w) / 2, top + LAY.boxH * (tick ? 0.18 : 0.16), w, LAY.boxH * (tick ? 0.64 : 0.68)); }
-      };
-      meta.forEach((m, li) => {
-        const yy = yOf(li), [i0, i1] = visRange(li);
-        if (glyphLOD(li)) {
-          for (let i = i0; i < i1; i++) glyph(m.kind, arrs[li][i], yy, m.color, lit(li, i) ? 1 : 0.14);
-        } else if (!hi) {
-          markSet(li, i0, i1); ctx.fillStyle = m.color; ctx.globalAlpha = 0.78; ctx.fill(); ctx.globalAlpha = 1;
-        } else {
-          markSet(li, i0, i1); ctx.fillStyle = m.color; ctx.globalAlpha = 0.13; ctx.fill();          // dim all
-          markSet(li, Math.max(i0, hi.lo[li]), Math.min(i1, hi.hi[li])); ctx.fillStyle = m.color; ctx.globalAlpha = 1; ctx.fill();   // bright = selected range
-          ctx.globalAlpha = 1;
-        }
-        ctx.fillStyle = m.color; ctx.globalAlpha = 1; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic'; ctx.font = '0.66px sans-serif';
-        ctx.fillText(m.label, 8.8, yy - 0.05);
-        ctx.fillStyle = P.ink2; ctx.font = '0.42px sans-serif';
-        ctx.fillText(`×${counts[li].toLocaleString()}`, 8.8, yy + 0.6);
+      // ── per-level label + ×count + 1:1 / 非1:1 tag ──
+      ctx.textAlign = 'right';
+      levels.forEach((Lv, li) => {
+        const yc = Lv.y0 + Math.min(Lv.h / 2, 3);
+        ctx.fillStyle = Lv.color; ctx.textBaseline = 'alphabetic'; ctx.font = '0.7px sans-serif';
+        ctx.fillText(Lv.label, margin - 0.6, yc);
+        ctx.fillStyle = P.ink2; ctx.font = '0.46px sans-serif';
+        ctx.fillText(`×${Lv.count.toLocaleString()}`, margin - 0.6, yc + 0.85);
+        if (LAYER_INFO[li]?.tag) { ctx.fillStyle = LAYER_INFO[li].tag!.startsWith('严格') ? '#04d793' : '#7c8db8'; ctx.font = '0.4px sans-serif'; ctx.fillText(LAYER_INFO[li].tag!.split('（')[0], margin - 0.6, yc + 1.55); }
       });
       ctx.restore();
       return;
@@ -442,7 +408,7 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
         <span style={{ fontSize: 11.5, color: 'var(--tx2)' }}>布局</span>
         {([['top', '顶视图'], ['layers', '层级图']] as [typeof layout, string][]).map(([id, lb]) => {
           const on = layout === id;
-          return <button key={id} onClick={() => setLayout(id)} title={id === 'top' ? '超节点顶视图（嵌套平铺）' : '层级图（线程→进程→卡→节点→机柜→超节点，示意层级间/层级内关系）'}
+          return <button key={id} onClick={() => setLayout(id)} title={id === 'top' ? '超节点顶视图（嵌套平铺）' : '层级矩阵图（超节点→机柜→节点→NPU→Die→AI Core，每层一张矩阵）'}
             style={{ padding: '4px 10px', fontSize: 11.5, borderRadius: 6, cursor: 'pointer', border: `1px solid ${on ? '#4369ef' : 'var(--bd)'}`, background: on ? 'rgba(67,105,239,0.12)' : 'transparent', color: on ? '#4369ef' : 'var(--tx2)' }}>{lb}</button>;
         })}
         <span style={{ borderLeft: '1px solid var(--bd)', height: 16, margin: '0 2px' }} />
@@ -470,7 +436,7 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
             <span style={{ fontSize: 10.5, color: 'var(--tx3)', marginLeft: 2 }}>{`${L.N1.toLocaleString()} 卡 · ${L.nC} 机柜 · 拖动 / 滚轮缩放`}</span>
           </>
         ) : (
-          <span style={{ fontSize: 10.5, color: 'var(--tx3)' }}>{`层级图 · 全量${LAY.counts.card.toLocaleString()} 卡 · 竖线=层级间包含 / 彩弧=层级内互联 · 缩放看个体，点节点高亮上下游`}</span>
+          <span style={{ fontSize: 10.5, color: 'var(--tx3)' }}>{`层级矩阵图 · 全量 ${LAY.levels[3].count.toLocaleString()} NPU · 每层一张矩阵(同顶视图) · 缩放看个体，点格高亮上下游链路`}</span>
         )}
       </div>
       {/* legend */}
@@ -487,30 +453,29 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
           </>
         ) : (
           <>
-            <div style={{ fontWeight: 600, color: 'var(--tx)', marginBottom: 3 }}>{`${TOK.supernode} · 层级图（与立体拓扑同层级）`}</div>
-            {/* what each glyph means */}
-            {([['L3 超节点', UB_LEVELS[3].color, '面板'], ['L2 机柜', UB_LEVELS[2].color, '柜(槽位)'], ['L1 节点', UB_LEVELS[1].color, '刀片·8 NPU 点'], ['L0 卡', UB_LEVELS[0].color, '芯片·die'], ['进程 rank', '#4369ef', '圆点'], ['线程', COMM_PATTERNS[2].color, '小竖条']] as [string, string, string][]).map(([nm, c, g]) => (
-              <div key={nm}><span style={{ display: 'inline-block', width: 9, height: 9, background: c, borderRadius: 2, verticalAlign: '-1px', marginRight: 5 }} />{nm} <span style={{ color: 'var(--tx3)' }}>= {g}</span></div>
+            <div style={{ fontWeight: 600, color: 'var(--tx)', marginBottom: 3 }}>{`${TOK.supernode} · 层级矩阵图`}</div>
+            {/* each level = a matrix grid of its real units, colour-keyed */}
+            {LAY.levels.map((Lv) => (
+              <div key={Lv.kind}><span style={{ display: 'inline-block', width: 9, height: 9, background: Lv.color, borderRadius: 2, verticalAlign: '-1px', marginRight: 5 }} />{Lv.label} <span style={{ color: 'var(--tx3)' }}>×{Lv.count.toLocaleString()}</span></div>
             ))}
-            <div style={{ borderTop: '1px solid var(--bd)', marginTop: 3, paddingTop: 3 }}>
-              <span style={{ display: 'inline-block', width: 11, height: 0, borderTop: '2px solid var(--tx3)', verticalAlign: 'middle', marginRight: 5 }} /><b style={{ color: 'var(--tx2)' }}>层级间</b> 灰竖线 = 包含（父⊃子）
-            </div>
-            <div><span style={{ display: 'inline-block', width: 12, height: 6, borderTop: `2px solid ${UB_LEVELS[1].color}`, borderRadius: '8px 8px 0 0', verticalAlign: 'middle', marginRight: 5 }} /><b style={{ color: 'var(--tx2)' }}>层级内</b> 彩弧 = 同级互联（卡/节点/机柜 mesh · rank 集合通信）</div>
-            <div style={{ color: 'var(--tx3)', fontSize: 10, marginTop: 2 }}>{`全量${TOK.supernode}（${LAY.counts.card.toLocaleString()} 卡 / ${LAY.counts.thr.toLocaleString()} 线程）· 每层铺满全部单元，放大显示单个图元+层内连线 · 点节点高亮上下游`}</div>
-            {selL && <div style={{ color: '#ffb020' }}>已选中：高亮其所属链路（上游父级 + 下游子级）· 再点取消</div>}
+            <div style={{ borderTop: '1px solid var(--bd)', marginTop: 3, paddingTop: 3, color: 'var(--tx3)', fontSize: 10 }}>每层=该级全部单元的矩阵铺排（同顶视图）· 缩小=聚合块，放大=单格 · 仅 NPU=rank=device 严格 1:1；Die/AI Core 非 1:1</div>
+            <div style={{ color: '#ffb020', fontSize: 10.5 }}>{selL ? '已选中：金色=其上游父级 + 下游子级链路 · 再点取消' : '点任一格 → 高亮上下游链路 + 右上详情'}</div>
           </>
         )}
       </div>
       {/* layered-view selection detail — level semantics (层内 / 层间关系 + 带宽/域) */}
       {layout === 'layers' && selL && (() => {
         const info = LAYER_INFO[selL.lvl]; if (!info) return null;
-        const col = [UB_LEVELS[3].color, UB_LEVELS[2].color, UB_LEVELS[1].color, UB_LEVELS[0].color, '#4369ef', COMM_PATTERNS[2].color][selL.lvl];
+        const col = LAY.levels[selL.lvl].color;
         return (
           <div style={{ position: 'absolute', top: 12, right: 12, width: 280, padding: '11px 13px', fontSize: 11.5, lineHeight: 1.5, background: 'var(--panel)', border: `1px solid ${col}`, borderRadius: 12, boxShadow: 'var(--shadow)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 7 }}>
               <span style={{ width: 10, height: 10, borderRadius: 3, background: col }} />
               <span style={{ fontWeight: 700, color: 'var(--tx)', fontSize: 12.5 }}>{info.name}</span>
-              {info.domain !== '—' && <span style={{ marginLeft: 'auto', fontSize: 10, padding: '1px 7px', borderRadius: 5, color: info.domain.includes('SU') ? '#04d793' : '#7c8db8', border: `1px solid ${info.domain.includes('SU') ? '#04d793' : '#7c8db8'}` }}>{info.domain}</span>}
+              <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                {info.tag && <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 5, color: info.tag.startsWith('严格') ? '#04d793' : '#ff4b7b', border: `1px solid ${info.tag.startsWith('严格') ? '#04d793' : '#ff4b7b'}` }}>{info.tag.split('（')[0]}</span>}
+                {info.domain !== '—' && <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 5, color: info.domain.includes('SU') ? '#04d793' : '#7c8db8', border: `1px solid ${info.domain.includes('SU') ? '#04d793' : '#7c8db8'}` }}>{info.domain}</span>}
+              </span>
             </div>
             <div style={{ marginBottom: 6 }}><span style={{ color: COMM_PATTERNS[2].color, fontWeight: 600 }}>层内关系</span> <span style={{ color: 'var(--tx2)' }}>{info.intra}</span></div>
             <div style={{ marginBottom: 6 }}><span style={{ color: '#4369ef', fontWeight: 600 }}>层间关系</span> <span style={{ color: 'var(--tx2)' }}>{info.inter}</span></div>

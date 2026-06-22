@@ -100,14 +100,14 @@ export const UB_LEVEL_META: Record<string, UbLevelMeta> = {
 
 // Layered-view semantics (per the 全栈关系图谱): for each hierarchy level —
 //  intra = 层内关系（同级成员如何协作）· inter = 层间关系（如何衔接到上层 + 流动对象）.
-export interface LayerInfo { key: string; name: string; intra: string; inter: string; bw: string; domain: string; }
+export interface LayerInfo { key: string; name: string; intra: string; inter: string; bw: string; domain: string; tag?: string; }
 export const LAYER_INFO: LayerInfo[] = [
-  { key: 'super',  name: `${TOK.supernode} / 集群`, intra: '域内全互联 · UB-Mesh（SU 窄快 + SO 广省）', inter: '顶层 · UB Load/Store 内存语义抹平总线/网络边界', bw: 'any-to-any <1 µs · 16 PB/s', domain: 'SU+SO' },
-  { key: 'cab',    name: '机柜', intra: '柜内 nD-FullMesh 全互联（≤128 卡 SU 超低延迟域）', inter: '↑ 总线池化 pooling：UB 统一编址 → 超节点“一台计算机”', bw: '柜内 FullMesh · 1:1 无收敛', domain: 'SU' },
-  { key: 'node',   name: '节点 / 刀片', intra: '节点内全互联 · 8 NPU + CPU 经 LQC 对 L1 平等编址', inter: '↑ 互联收敛 interconnect：经 L1/L2 上联（单跳 200 ns · 1:1）', bw: 'LQC 8×56G(NPU) / 8×30G(CPU)', domain: 'SU' },
-  { key: 'card',   name: '卡 / NPU', intra: '相邻 die 对等 D2D · 板载 2D-Mesh', inter: '↑ 互联收敛：卡间数据 LQC → L1', bw: 'D2D 784 GB/s · 单卡 UB 2016 GB/s', domain: 'SU' },
-  { key: 'rank',   name: '进程 rank', intra: '集合通信：TP/EP→SU 窄快，PP/DP→SO 广省（multi-ring AllReduce / All-to-All）', inter: '↑ 坐标绑定 binding：1 NPU = 1 rank（HCCL 通信域）', bw: '进程级集合通信', domain: '—' },
-  { key: 'thread', name: '线程 / AI Core', intra: '核间同步：Cube↔Vector 经 GlobalMem + CrossCoreFlag · SPMD by block_idx', inter: '↑ 物理实现 realization：rank 内 TileShape 切分到 AI Core', bw: '核内 TQue/TPipe 流水', domain: '—' },
+  { key: 'super', name: `${TOK.supernode} / 集群`, intra: '域内全互联 · UB-Mesh（SU 窄快 + SO 广省）', inter: '顶层 · UB Load/Store 内存语义抹平总线/网络边界', bw: 'any-to-any <1 µs · 16 PB/s', domain: 'SU+SO' },
+  { key: 'cab',   name: '机柜', intra: '柜内 nD-FullMesh（≤128 卡 SU 超低延迟域）', inter: '↑ 总线池化 pooling：UB 统一编址 → 超节点“一台计算机”', bw: '柜内 FullMesh · 1:1 无收敛', domain: 'SU' },
+  { key: 'node',  name: '节点 / 刀片', intra: '节点内全互联 · 8 NPU + CPU 经 LQC 对 L1 平等编址', inter: '↑ 互联收敛 interconnect：经 L1/L2 上联（单跳 200 ns · 1:1）', bw: 'LQC 8×56G(NPU) / 8×30G(CPU)', domain: 'SU' },
+  { key: 'npu',   name: 'NPU = rank = device', intra: '封装内 2 Die 对等 D2D · 集合通信(TP/EP→SU, PP/DP→SO)。这一级才是严格 1:1：1 NPU = 1 HCCL rank = 1 device', inter: '↑ 坐标绑定 binding：HCCL 通信域 · 互联收敛 LQC→L1', bw: 'D2D 784 GB/s · 单卡 UB 2016 GB/s', domain: '—', tag: '严格 1:1' },
+  { key: 'die',   name: 'Die（封装内）', intra: '相邻 Die 对等 D2D；含 HBM / NoC（机器层级 L2–L3）· device 由多 Die 组成', inter: '↑ 封装访存 packaging：核经 L0/L1/UB ↔ HBM', bw: 'D2D 双向 784 GB/s · HBM 1.6–9.6 TB/s', domain: '—' },
+  { key: 'core',  name: 'AI Core · Cube / Vector', intra: '核间同步 GlobalMem + CrossCoreFlag · SPMD by block_idx（上代有 SIMD 无 SIMT；新代加 SIMT）', inter: '↑ 物理实现 realization：rank 内 TileShape 切到 AI Core', bw: '核内 TQue/TPipe 流水', domain: '—', tag: '非 1:1（block_dim 可超核数·wave 执行）' },
 ];
 
 // ─── Process / thread communication overlays (node view) ─────────────────────
