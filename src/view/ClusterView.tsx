@@ -107,7 +107,7 @@ const MODE_TABS: { id: ViewMode; label: string }[] = [
   { id: 'topology', label: 'UB 互联层级' },
   { id: 'matrix',   label: '邻接矩阵' },
   { id: 'mapping',  label: '软硬件映射' },
-  { id: 'trace',    label: '线程时序' },
+  { id: 'trace',    label: '执行时序/定位' },
   { id: 'fullpod',  label: '整列全景(多卡)' },
   { id: 'plane',    label: '平面视图' },
 ];
@@ -838,7 +838,7 @@ export function ClusterView() {
               <>
                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--tx)' }}>全量超节点 · 图例</div>
                 {/* layer elements — same canonical colour per concept as the layered/top views */}
-                <LgRow shape="dot" color={ENTITY_COLORS.cube} label="线程 / AI Core（设备内）" />
+                <LgRow shape="dot" color={ENTITY_COLORS.cube} label="AI Core（设备内 · block）" />
                 <LgRow shape="dot" color={ENTITY_COLORS.rank} label="rank（软件 · 1:1 绑定 device）" />
                 <LgRow shape="sq" color={ENTITY_COLORS.card} label="L0 卡 / device（4 Die）" />
                 <LgRow shape="sq" color={ENTITY_COLORS.node} label="L1 刀片 / 节点" />

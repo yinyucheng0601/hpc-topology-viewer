@@ -12,7 +12,6 @@ import { GENERATIONS, PARTITION_PALETTE, PARALLEL_COLORS, PARTITION_META, UB_LEV
 import { TOK } from '../content';
 
 const CPB = 8, BPC = 8;   // cards / blade, blades / cabinet (= 64 NPU / cabinet)
-const AIC_BLOCKS = 3;     // schematic AI-core blocks (block_idx slices) shown inside a card on deep zoom
 const COLOR_BTNS: { id: PartitionDim; label: string }[] = [
   { id: 'none', label: '无' }, { id: 'tp', label: 'TP' }, { id: 'pp', label: 'PP' }, { id: 'dp', label: 'DP' }, { id: 'ep', label: 'EP' },
 ];
@@ -286,24 +285,31 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
     for (let b = 0; b < L.nB; b++) { const [x, y] = bladeXY(Math.floor(b / BPC), b % BPC); ctx.strokeRect(x, y, L.bw, L.bh); }
 
     // cards
-    const showBorder = s > 4, showId = s > 14, showBlk = s > 26;   // card = device (HW); r-label = bound rank (SW); AI-core blocks on deep zoom
-    const blkC = COMM_PATTERNS[2].color;
+    const showBorder = s > 4, showId = s > 14, showDie = s > 26;   // card = device (HW); r-label = bound rank (SW); 4-Die package on deep zoom
     ctx.lineWidth = 0.6 / s; ctx.strokeStyle = P.cardBd;
     for (let k = 0; k < L.N1; k++) {
       const [x, y] = cardXY(k); const g = groupOf(k);
       ctx.fillStyle = g < 0 ? P.cardN : PARTITION_PALETTE[g % PARTITION_PALETTE.length];
       ctx.fillRect(x, y, L.cs, L.cs);
       if (showBorder) ctx.strokeRect(x, y, L.cs, L.cs);
-      // card = 1 device (HW); the r-label is the SOFTWARE rank bound 1:1 to it; the
-      // sub-cells are schematic AI-core blocks (device-internal SPMD, not a HW level)
+      // card = 1 device (HW); the r-label is the SOFTWARE rank bound 1:1 to it; on deep
+      // zoom the card interior shows the 950 package = 4 Die — SAME glyph as the layered
+      // view + 3D NpuChip (2 compute Die UMA-bridged → 1 device + 2 IO Die).
       if (showId && x + L.cs >= vx0 && x <= vx1 && y + L.cs >= vy0 && y <= vy1) {
-        ctx.fillStyle = P.ink; ctx.textAlign = 'center'; ctx.font = '0.28px sans-serif';
-        ctx.textBaseline = showBlk ? 'top' : 'middle';
-        ctx.fillText(`r${k}`, x + L.cs / 2, y + (showBlk ? 0.07 : L.cs / 2));
-        if (showBlk) {
-          const gp = L.cs * 0.07, tw = (L.cs - gp * (AIC_BLOCKS + 1)) / AIC_BLOCKS, th = L.cs * 0.34, tyy = y + L.cs - th - gp;
-          ctx.fillStyle = blkC;
-          for (let t = 0; t < AIC_BLOCKS; t++) ctx.fillRect(x + gp + t * (tw + gp), tyy, tw, th);
+        ctx.fillStyle = P.ink; ctx.textAlign = 'center'; ctx.font = '0.26px sans-serif';
+        ctx.textBaseline = showDie ? 'top' : 'middle';
+        ctx.fillText(`r${k}`, x + L.cs / 2, y + (showDie ? 0.05 : L.cs / 2));
+        if (showDie) {
+          const ins = L.cs * 0.14, gp = L.cs * 0.07;
+          const dw = (L.cs - ins * 2 - gp) / 2, dh = (L.cs * 0.7 - gp) / 2;
+          const x0 = x + ins, x1 = x + ins + dw + gp, y0 = y + L.cs * 0.28, y1 = y + L.cs * 0.28 + dh + gp;
+          ctx.fillStyle = ENTITY_COLORS.computeDie;   // 2 compute Die (teal, UMA)
+          ctx.fillRect(x0, y0, dw, dh); ctx.fillRect(x1, y0, dw, dh);
+          ctx.strokeStyle = ENTITY_COLORS.computeDie; ctx.lineWidth = L.cs * 0.045;   // UMA bridge → 1 device
+          ctx.beginPath(); ctx.moveTo(x0 + dw, y0 + dh / 2); ctx.lineTo(x1, y0 + dh / 2); ctx.stroke();
+          ctx.lineWidth = 0.6 / s; ctx.strokeStyle = P.cardBd;
+          ctx.fillStyle = ENTITY_COLORS.ioDie;   // 2 IO Die (grey)
+          ctx.fillRect(x0, y1, dw, dh); ctx.fillRect(x1, y1, dw, dh);
         }
       }
     }
@@ -500,7 +506,7 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
             <div style={{ fontWeight: 600, color: 'var(--tx)', marginBottom: 2 }}>{`全量${TOK.supernode} · 平面拓扑`}</div>
             <div><span style={{ display: 'inline-block', width: 11, height: 11, background: 'rgba(167,139,250,0.18)', border: `1px solid ${UB_LEVELS[2].color}`, borderRadius: 2, verticalAlign: '-2px', marginRight: 5 }} />L2 机柜框（含 8 刀片）</div>
             <div><span style={{ display: 'inline-block', width: 11, height: 11, border: `1px solid ${UB_LEVELS[1].color}`, borderRadius: 2, verticalAlign: '-2px', marginRight: 5 }} />L1 刀片框（含 8 卡）</div>
-            <div><span style={{ color: ENTITY_COLORS.card, fontWeight: 600 }}>卡 = 1 device</span>（硬件）· <span style={{ color: ENTITY_COLORS.rank, fontWeight: 600 }}>r 号 = rank</span>（软件 · 1:1 绑定） · <span style={{ display: 'inline-block', width: 9, height: 7, background: ENTITY_COLORS.cube, borderRadius: 1, verticalAlign: '-1px', margin: '0 4px' }} />卡内格 = AI Core 块（block_idx，放大显示）</div>
+            <div><span style={{ color: ENTITY_COLORS.card, fontWeight: 600 }}>卡 = 1 device</span>（硬件）· <span style={{ color: ENTITY_COLORS.rank, fontWeight: 600 }}>r 号 = rank</span>（软件 · 1:1 绑定） · <span style={{ display: 'inline-block', width: 7, height: 7, background: ENTITY_COLORS.computeDie, borderRadius: 1, verticalAlign: '-1px', marginLeft: 4, marginRight: 1 }} /><span style={{ display: 'inline-block', width: 7, height: 7, background: ENTITY_COLORS.ioDie, borderRadius: 1, verticalAlign: '-1px', marginRight: 4 }} />卡内 = 4 Die：2 计算(UMA)+2 IO（放大显示）</div>
             <div>{colorBy === 'none' ? '格子 = 1 张 950 卡 / device（嵌套=包含关系）' : `卡按 ${colorBy.toUpperCase()} 组上色（${cfg}）`}</div>
             {links && <div><span style={{ display: 'inline-block', width: 11, height: 0, borderTop: `2px solid ${UB_LEVELS[1].color}`, verticalAlign: 'middle', marginRight: 5 }} />卡↔卡(L1) · <span style={{ display: 'inline-block', width: 11, height: 0, borderTop: `2px solid ${UB_LEVELS[2].color}`, verticalAlign: 'middle', margin: '0 5px' }} />节点↔节点(L2)，放大显示</div>}
             {play && <div style={{ color: scenario === 'ring' ? COMM_PATTERNS[0].color : COMM_PATTERNS[1].color }}>{scenario === 'ring' ? '▶ Ring-AllReduce：先卡内(L1)逐跳→再机柜内(L2)' : '▶ All-to-All：机柜内刀片全互联(L2)'} · 放大看流动</div>}

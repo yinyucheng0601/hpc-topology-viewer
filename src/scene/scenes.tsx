@@ -1575,9 +1575,9 @@ export function TraceScene({ onHoverInfo, onLocate, tick }: SceneCallbacks & { o
       <Floor size={14} />
 
       {/* row labels (left) — hardware rows coloured by UB level, like topology */}
-      {rowLabel(yThread, '线程/Tile（设备内）', THREAD_COLOR)}
+      {rowLabel(yThread, 'AI Core（设备内）', THREAD_COLOR)}
       {rowLabel(yProc, 'rank（软件）', PROC_COLOR)}
-      {rowLabel(yNpu, 'NPU = device（硬件）', LC.text)}
+      {rowLabel(yNpu, '卡 / NPU = device', LC.text)}
       {rowLabel(yBlade, 'L1 刀片', L(1))}
       {rowLabel(yCab, 'L2 机柜', L(2))}
       {rowLabel(ySuper, 'L3 超节点', L(3))}
@@ -1639,7 +1639,7 @@ export function TraceScene({ onHoverInfo, onLocate, tick }: SceneCallbacks & { o
       </group>
 
       <Text position={[0, 0.02, 1.0]} rotation={[-Math.PI / 2, 0, 0]} fontSize={0.16} color={LC.textDim} anchorX="center">
-        {'软件 rank/线程 水平排布 · 硬件层级竖向（与 UB 互联一致）· rank↔device 1:1 · 顶栏播放看时序 · 点击定位+联动'}
+        {'最细 = AI Core（设备内）· 上方 rank（软件）↔ device 1:1 · 硬件层级竖向（超节点→机柜→节点→卡→AI Core，与层级图一致）· 顶栏播放看时序 · 点击定位+联动'}
       </Text>
     </group>
   );
@@ -1929,7 +1929,7 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
   const xL = -G.fieldW / 2 - 0.9;
   const lblSize = Math.min(0.5, 0.16 + G.fieldW * 0.004);
   const bands: [number, number, string, string][] = [
-    [0, G.yThread, '线程(设备内)', THREAD_COLOR], [1, G.yProc, 'rank(软件)', PROC_COLOR], [2, G.yCard, 'L0 卡=device', L(0)],
+    [0, G.yThread, 'AI Core(设备内)', THREAD_COLOR], [1, G.yProc, 'rank(软件)', PROC_COLOR], [2, G.yCard, 'L0 卡=device', L(0)],
     [3, G.yBlade, 'L1 节点', L(1)], [4, G.yCab, 'L2 机柜', L(2)], [5, G.ySuper, `L3 ${TOK.supernode}`, L(3)], [6, G.yCluster, 'L4 超节点间', L(4)],
   ];
 
