@@ -8,7 +8,10 @@
  * Display text with brand terms is sourced from ../content (decoded at runtime).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { GENERATIONS, PARTITION_PALETTE, PARALLEL_COLORS, PARTITION_META, UB_LEVELS, COMM_PATTERNS, LAYER_INFO, CORES_PER_CARD, ENTITY_COLORS, UB_COORD, RUN_SCHED, type Gen, type PartitionDim, type RunMode, type RunPhase } from '../scene/data';
+import { GENERATIONS, PARTITION_PALETTE, PARALLEL_COLORS, PARTITION_META, UB_LEVELS, COMM_PATTERNS, LAYER_INFO, CORES_PER_CARD, ENTITY_COLORS, UB_COORD, RUN_SCHED, PLANES, LEVEL_PHYS, type Gen, type PartitionDim, type RunMode, type RunPhase } from '../scene/data';
+
+// short plane tag per level (drawn in the narrow 层级图 axis gutter)
+const PLANE_TAG: Record<string, string> = { ub: 'UB·SU', rdma: 'RDMA·SO', multi: '多平面', none: '片上' };
 import { TOK } from '../content';
 import { PlanesPanel } from './PlanesPanel';
 
@@ -340,6 +343,9 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
             ctx.globalAlpha = 0.9 * A; rr(x0 + dw, y0 + dh * 0.32, g, dh * 0.36, dh * 0.12); ctx.fill();   // UMA bridge = solid block
             ctx.fillStyle = ENTITY_COLORS.ioDie; ctx.globalAlpha = 0.62 * A;   // 2 IO Die (solid grey)
             rr(x0, y1, dw, dh, ws * 0.04); ctx.fill(); rr(x1, y1, dw, dh, ws * 0.04); ctx.fill();
+            // NPU 物理端口：UB 口(绿·scale-up) + RDMA 口(橙·scale-out)
+            ctx.globalAlpha = A; ctx.fillStyle = PLANES[0].color; ctx.beginPath(); ctx.arc(x + ws - ws * 0.09, y + ws * 0.1, ws * 0.05, 0, 7); ctx.fill();
+            ctx.fillStyle = PLANES[1].color; ctx.beginPath(); ctx.arc(x + ws - ws * 0.09, y + ws * 0.26, ws * 0.05, 0, 7); ctx.fill();
           } else {   // too small → a single solid compute-die hint band
             ctx.fillStyle = ENTITY_COLORS.computeDie; ctx.globalAlpha = 0.7 * A;
             rr(x + ws * 0.16, y + ws * 0.22, ws * 0.68, ws * 0.3, ws * 0.05); ctx.fill();
@@ -438,7 +444,10 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
         if (!Lv.banner) { ctx.fillStyle = P.ink2; ctx.font = `10px ${MONO}`; ctx.fillText(`×${Lv.count.toLocaleString()}`, lx, yy); yy += 13; }
         if (LAYER_INFO[li]?.tag) { ctx.fillStyle = LAYER_INFO[li].tag!.includes('1:1') ? '#04d793' : '#7c8db8'; ctx.font = '9.5px sans-serif'; ctx.fillText(LAYER_INFO[li].tag!.split('（')[0], lx, yy); yy += 12; }
         const lq = UB_COORD[LAYER_INFO[li]?.key];   // UB L0–L7 同一坐标（L 号在层名里，这里标作用域）
-        if (lq) { ctx.fillStyle = '#9fb6ff'; ctx.font = '9.5px sans-serif'; ctx.fillText(`${TOK.ub} ${lq.scope}`, lx, yy); }
+        if (lq) { ctx.fillStyle = '#9fb6ff'; ctx.font = '9.5px sans-serif'; ctx.fillText(`${TOK.ub} ${lq.scope}`, lx, yy); yy += 12; }
+        // per-level physical plane tag (NPU 端口 / CPU / LPO / NIC 落在哪一层 · 见右侧详情)
+        const phys = LEVEL_PHYS[Lv.kind];
+        if (phys) { ctx.fillStyle = phys.color; ctx.font = '600 9.5px sans-serif'; ctx.fillText(`◆ ${PLANE_TAG[phys.plane]}`, lx, yy); }
       });
       phaseBanner();
       return;
@@ -473,6 +482,9 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
       // shows the 950 package = 4 Die (2 compute UMA + 2 IO); zoom further → each compute
       // Die reveals its AI Core array (Cube/Vector) — SAME glyph/colour as the 层级图.
       if (showId && x + L.cs >= vx0 && x <= vx1 && y + L.cs >= vy0 && y <= vy1) {
+        // NPU 物理端口：UB 口(绿·scale-up) + RDMA/RoCE 口(橙·scale-out) — 卡上不同 SerDes 组
+        ctx.fillStyle = PLANES[0].color; ctx.beginPath(); ctx.arc(x + L.cs * 0.86, y + L.cs * 0.12, L.cs * 0.06, 0, 7); ctx.fill();
+        ctx.fillStyle = PLANES[1].color; ctx.beginPath(); ctx.arc(x + L.cs * 0.86, y + L.cs * 0.26, L.cs * 0.06, 0, 7); ctx.fill();
         ctx.fillStyle = P.ink; ctx.textAlign = 'center'; ctx.font = '0.26px sans-serif';
         ctx.textBaseline = showDie ? 'top' : 'middle';
         ctx.fillText(`r${k}`, x + L.cs / 2, y + (showDie ? 0.05 : L.cs / 2));
@@ -810,6 +822,17 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
             <div style={{ marginBottom: 6 }}><span style={{ color: COMM_PATTERNS[2].color, fontWeight: 600 }}>层内关系</span> <span style={{ color: 'var(--tx2)' }}>{info.intra}</span></div>
             <div style={{ marginBottom: 6 }}><span style={{ color: '#4369ef', fontWeight: 600 }}>层间关系</span> <span style={{ color: 'var(--tx2)' }}>{info.inter}</span></div>
             <div style={{ color: 'var(--tx3)', fontSize: 10.5 }}>带宽/时延：{info.bw}</div>
+            {/* per-level physical devices & plane (mirrors the reference 物理三平面 layer) */}
+            {(() => { const phys = LEVEL_PHYS[LAY.levels[selL.lvl]?.kind]; if (!phys) return null; return (
+              <div style={{ marginTop: 6, padding: '6px 7px', borderRadius: 7, background: `${phys.color}1c`, border: `1px solid ${phys.color}66` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: phys.color }} />
+                  <span style={{ color: 'var(--tx)', fontWeight: 700, fontSize: 10.5 }}>物理 / 平面</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 9.5, padding: '0 6px', borderRadius: 5, color: phys.color, border: `1px solid ${phys.color}88` }}>{phys.planeLabel}</span>
+                </div>
+                <div style={{ color: 'var(--tx2)', fontSize: 10.5 }}>{phys.devices}</div>
+              </div>
+            ); })()}
             {/* UB L0–L7 软硬件同一坐标（L0–L7 对齐表） */}
             {UB_COORD[info.key] && (() => { const lq = UB_COORD[info.key]; return (
               <div style={{ marginTop: 6, padding: '6px 7px', borderRadius: 7, background: 'rgba(124,141,184,0.10)', border: '1px solid rgba(124,141,184,0.34)' }}>

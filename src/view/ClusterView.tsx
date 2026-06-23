@@ -464,8 +464,8 @@ export function ClusterView() {
           {mode === 'plane' && <PlaneView gen={gen} dark={dark} />}
 
           {/* physical-device layer & three planes (UB scale-up / RDMA scale-out / VPC) —
-              shown across all 3-D sub-views incl. 阵列全景; PlaneView renders its own */}
-          {mode !== 'plane' && <PlanesPanel />}
+              integrated into the 阵列全景 only (顶视图/层级图 are in PlaneView) */}
+          {mode === 'fullpod' && <PlanesPanel />}
 
           {/* floating on-canvas control panel — per-view controls (collapsible) */}
           {(mode === 'topology' || (mode === 'node' && nodeKind === 'compute') || mode === 'matrix' || mode === 'fullpod') && (

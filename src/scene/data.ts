@@ -156,6 +156,27 @@ export const PHYS_CHAINS: PhysChain[] = [
   { plane: 'vpc', label: 'VPC（南北向）', hops: [`${TOK.kunpeng} CPU`, `${TOK.qingtian} NIC`, '数据中心网络'] },
 ];
 
+// ── PER-LEVEL physical devices & plane (把物理器件挂到每一层级上) ─────────────────
+// Mirrors the reference "物理三平面" layer: each hierarchy level carries WHICH physical
+// devices live there and WHICH plane it rides. Keyed by the level `kind` used in the
+// 层级图 (LAY.levels.kind) and mapped onto the 阵列全景 bands. `color` = plane accent
+// (grey = on-chip, no external port). Consumed by PlaneView (层级图) + FullPodScene bands.
+export interface LevelPhys { plane: PlaneId | 'none' | 'multi'; planeLabel: string; color: string; devices: string; short: string }
+export const LEVEL_PHYS: Record<string, LevelPhys> = {
+  cluster: { plane: 'rdma', planeLabel: 'RDMA · Scale-out', color: '#ffaa3b', short: 'RDMA口→其它超节点', devices: `跨超节点 · ${TOK.uboe}/RoCE（NPU RDMA 口）` },
+  super:   { plane: 'ub',   planeLabel: 'UB · Scale-up',    color: '#04d793', short: 'UB 交换 · LPO', devices: `L2 ${TOK.ub} 交换 · LPO 光模块(柜间)` },
+  cab:     { plane: 'ub',   planeLabel: 'UB · Scale-up',    color: '#04d793', short: '柜内 mesh · 铜/LPO', devices: `柜内 ${TOK.fullmesh} · 铜/LPO 上行` },
+  node:    { plane: 'multi', planeLabel: 'UB / RDMA / VPC', color: '#9d7bff', short: 'UB口/RDMA口·CPU·LPO·NIC', devices: 'NPU UB口 + RDMA口 · 鲲鹏 CPU · LPO · 擎天 NIC · L1 交换' },
+  card:    { plane: 'multi', planeLabel: 'UB + RDMA',       color: '#04d793', short: 'NPU UB口 + RDMA口', devices: 'NPU 封装：UB 端口(绿·scale-up) + RDMA/RoCE 端口(橙·scale-out)' },
+  die:     { plane: 'none',  planeLabel: '片上 · 无对外口',  color: '#7c8db8', short: '片上 · 无对外口', devices: 'D2D 784 GB/s · NoC · HBM' },
+  core:    { plane: 'none',  planeLabel: '片上 · 无对外口',  color: '#7c8db8', short: '片上 · 无对外口', devices: 'AIC(Cube)/AIV(Vector) · Global Memory' },
+  tile:    { plane: 'none',  planeLabel: '片上 · 无对外口',  color: '#7c8db8', short: '片上 · 无对外口', devices: 'Cube/Vector 单元 · UB/L0 buffer' },
+};
+// 阵列全景 band index → LEVEL_PHYS key
+export const BAND_PHYS_KEY: Record<number, string> = {
+  7: 'tile', 0: 'core', 1: 'die', 2: 'card', 3: 'node', 4: 'cab', 5: 'super', 6: 'cluster',
+};
+
 // Each hierarchy level carries HARDWARE facts (hw) and the SOFTWARE view (sw)
 // SEPARATELY — rank is pure software (a collective-comm logical id) bound to a device,
 // never the device itself. Tuned for the 950 (4-Die package · UMA · ≈32 AI Core/card).
@@ -444,7 +465,7 @@ export const NODE_DIM = { w: 0.86, h: 0.12, d: 0.72 };
 
 export interface NodePart {
   id: string;
-  type: 'npu' | 'cpu' | 'ub-fabric' | 'dpu' | 'optical' | 'dimm' | 'lpo' | 'nic';
+  type: 'npu' | 'cpu' | 'ub-fabric' | 'dpu' | 'optical' | 'dimm';
   label: string;
   pos: [number, number, number];
   size: [number, number, number];
@@ -489,13 +510,10 @@ export const NODE_PARTS: NodePart[] = (() => {
       pos: [(i - 0.5) * 0.22, 0.016, 0.02], size: [0.075, 0.014, 0.06],
     });
   }
-  // 擎天 NIC (VPC plane egress — NOT scale-out RDMA, which rides the NPU's own RoCE port)
-  parts.push({ id: 'nic', type: 'nic', label: `${TOK.qingtian} NIC · VPC 平面（紫）· CPU→NIC→数据中心（南北向，非 scale-out RDMA）`, pos: [0.36, 0.02, 0.24], size: [0.085, 0.02, 0.16] });
-  // LPO 光模块 row (linear-drive, DSP-less optics — the柜间 optical medium shared by
-  // scale-up UB & scale-out RDMA: 功耗降 35–50% · 单跳<3ns)
-  parts.push({ id: 'lpo', type: 'lpo', label: 'LPO 光模块（线性直驱·去 DSP）· 柜间光介质 · scale-up(UB)/scale-out(RDMA) 共用 · 7–8.5W·<3ns', pos: [-0.02, 0.02, -0.27], size: [0.62, 0.024, 0.03] });
-  // rear optical panel: NPU 两类口经 LPO 上行 — UB 端口(绿·scale-up→通信柜 L3 Clos) + RDMA 端口(橙·scale-out→其它超节点)
-  parts.push({ id: 'optical', type: 'optical', label: '光口区 · NPU UB 端口(绿·scale-up→L3 Clos) + NPU RDMA/RoCE 端口(橙·scale-out 400G→其它超节点)', pos: [-0.02, 0.02, -0.34], size: [0.7, 0.026, 0.018] });
+  // DPU (VPC egress)
+  parts.push({ id: 'dpu', type: 'dpu', label: `${TOK.qingtian} · VPC 外网`, pos: [0.36, 0.02, 0.24], size: [0.085, 0.02, 0.16] });
+  // rear optical panel (UB uplink to comms cabinets, L3)
+  parts.push({ id: 'optical', type: 'optical', label: '光口区 · UB 上行至通信柜（L3 Clos）+ RoCE scale-out', pos: [-0.02, 0.02, -0.34], size: [0.7, 0.026, 0.018] });
   return parts;
 })();
 

@@ -23,7 +23,7 @@ import {
   UB_LEVELS, UB_LEVEL_META, COMM_PATTERNS, RACK_COLORS, ENTITY_COLORS, UB_COORD_TOPO,
   buildHall, CAB_W, CAB_H, CAB_D,
   SCALES, makeAdjacency, makeSwitchedAdjacency, TRACE_SCHED, PARTITION_PALETTE,
-  loadColor, nodeLoad, mute, PLANES,
+  loadColor, nodeLoad, mute, PLANES, LEVEL_PHYS, BAND_PHYS_KEY,
   type RackKind, type RackUnit, type NodePart, type GenSpec, type CabinetCell, type Scale, type RunMode, type RunPhase, type PartitionDim,
 } from './data';
 import { TOK } from '../content';
@@ -520,16 +520,14 @@ function NodePartMesh({ part, hovered, selected, onHover, onSelect }: {
     cpu:        { body: LC.cpuBody,     top: LC.cpuTop, edge: '#38bdf8' },
     'ub-fabric':{ body: LC.ubBody,      top: L(1),      edge: L(1) },
     dpu:        { body: LC.dpuBody,     top: '#23304a', edge: '#818cf8' },
-    nic:        { body: LC.dpuBody,     top: '#23304a', edge: '#9d7bff' },   // 擎天 NIC · VPC 平面(紫)
     optical:    { body: LC.opticalBody, edge: L(3) },
-    lpo:        { body: LC.opticalBody, edge: '#36e0c4' },                   // LPO 光模块(青)
     dimm:       { body: LC.dimmBody,    edge: '#475263' },
   };
   const v = visuals[part.type];
   // GLB swap-point per discrete part type (npu/cpu handled by NpuChip/CpuChip)
   const swapId = part.type === 'dimm' ? 'mem-ddr5-rdimm'
-    : part.type === 'optical' || part.type === 'lpo' ? 'optic-osfp-module'
-    : part.type === 'dpu' || part.type === 'nic' ? 'dpu-nic-card' : '';
+    : part.type === 'optical' ? 'optic-osfp-module'
+    : part.type === 'dpu' ? 'dpu-nic-card' : '';
 
   return (
     <group
@@ -550,16 +548,9 @@ function NodePartMesh({ part, hovered, selected, onHover, onSelect }: {
               color={v.top} metalness={part.type === 'ub-fabric' ? 0.3 : 0.85} roughness={part.type === 'ub-fabric' ? 0.5 : 0.3}
               emissive={part.type === 'ub-fabric' ? v.top : '#000000'} emissiveIntensity={part.type === 'ub-fabric' ? (hovered ? 0.9 : 0.4) : 0} />
           )}
-          {/* optical panel: NPU 两类口 — 偶=UB 端口(绿·scale-up) 奇=RDMA/RoCE 口(橙·scale-out) */}
-          {part.type === 'optical' && Array.from({ length: 14 }, (_, i) => {
-            const col = i % 2 === 0 ? '#04d793' : '#ffaa3b';
-            return <Slab key={i} size={[0.028 * S, sy * S * 0.6, 0.008 * S]} position={[(i - 6.5) * 0.044 * S, 0, sz * S * 0.7]}
-              color={col} emissive={col} emissiveIntensity={hovered ? 0.9 : 0.4} />;
-          })}
-          {/* LPO 光模块 row (青) — 线性直驱光介质 */}
-          {part.type === 'lpo' && Array.from({ length: 12 }, (_, i) => (
-            <Slab key={i} size={[0.03 * S, sy * S * 0.7, 0.01 * S]} position={[(i - 5.5) * 0.05 * S, 0, sz * S * 0.5]}
-              color="#36e0c4" emissive="#36e0c4" emissiveIntensity={hovered ? 0.9 : 0.4} />
+          {part.type === 'optical' && Array.from({ length: 14 }, (_, i) => (
+            <Slab key={i} size={[0.028 * S, sy * S * 0.6, 0.008 * S]} position={[(i - 6.5) * 0.044 * S, 0, sz * S * 0.7]}
+              color={LC.vent} emissive="#fbbf24" emissiveIntensity={hovered ? 0.8 : 0.3} />
           ))}
         </ModelOr>
       )}
@@ -2026,6 +2017,10 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
               onClick={(e) => { e.stopPropagation(); setFocus((f) => (f === i ? null : i)); }}
               onPointerOver={() => setCursor(true)} onPointerOut={() => setCursor(false)}>{t}</Text>
             <Text position={[0, -lblSize * 0.92, 0]} fontSize={lblSize * 0.58} color="#9fb6ff" anchorX="right" anchorY="middle">{bandCoord[i]}</Text>
+            {/* per-level physical devices & plane (物理三平面) — shown when the 三平面 toggle is on */}
+            {planes && LEVEL_PHYS[BAND_PHYS_KEY[i]] && (
+              <Text position={[0, -lblSize * 1.62, 0]} fontSize={lblSize * 0.52} color={LEVEL_PHYS[BAND_PHYS_KEY[i]].color} anchorX="right" anchorY="middle">{`◆ ${LEVEL_PHYS[BAND_PHYS_KEY[i]].short}`}</Text>
+            )}
           </Billboard>
         )
       ))}
