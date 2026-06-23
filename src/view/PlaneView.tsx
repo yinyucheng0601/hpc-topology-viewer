@@ -309,43 +309,44 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
       // per-level simplified glyph (distinct shape, with internal detail when the cell
       // is big enough): cabinet slats · blade+dots · card = 4 Die (2 compute UMA + 2 IO) ·
       // 计算 Die = teal die + AI-core dots · AI Core = 独立 Cube/Vector 核 (Cube∶Vector ≈ 8∶1).
+      // per-level glyph — SOLID colour blocks (not wireframe outlines): each unit is a
+      // filled block; internal structure is shown as darker / lighter sub-blocks rather
+      // than strokes (depth via stacked tints, like Figma). Distinct shape per level.
+      const DK = (a: number) => `rgba(0,0,0,${a})`;       // darken overlay (inset detail)
+      const LT = (a: number) => `rgba(255,255,255,${a})`; // lighten overlay (dots)
       const glyph = (kind: string, x: number, y: number, ws: number, base: string, A: number) => {
         const px = ws * s;
-        ctx.fillStyle = base; ctx.strokeStyle = base; ctx.lineWidth = Math.max(0.012, ws * 0.05);
-        if (kind === 'super') { ctx.globalAlpha = 0.2 * A; rr(x, y, ws, ws, ws * 0.16); ctx.fill(); ctx.globalAlpha = A; ctx.stroke(); }
-        else if (kind === 'cab') {   // upright cabinet + horizontal slats
-          const cw = ws * 0.6, cx = x + (ws - cw) / 2;
-          ctx.globalAlpha = 0.22 * A; rr(cx, y, cw, ws, ws * 0.08); ctx.fill(); ctx.globalAlpha = A; ctx.stroke();
-          if (px > 5) { ctx.globalAlpha = 0.5 * A; ctx.lineWidth = ws * 0.035; for (let k = 1; k < 4; k++) { const yy = y + ws * k / 4; ctx.beginPath(); ctx.moveTo(cx + cw * 0.16, yy); ctx.lineTo(cx + cw * 0.84, yy); ctx.stroke(); } }
-        } else if (kind === 'node') {   // horizontal blade + NPU dots
-          const bh = ws * 0.46, by = y + (ws - bh) / 2;
-          ctx.globalAlpha = 0.22 * A; rr(x, by, ws, bh, bh * 0.3); ctx.fill(); ctx.globalAlpha = A; ctx.stroke();
-          if (px > 7) { ctx.globalAlpha = 0.85 * A; for (let d = 0; d < 8; d++) { const dx = x + ws * (0.1 + 0.8 * d / 7); ctx.beginPath(); ctx.arc(dx, y + ws / 2, ws * 0.04, 0, 7); ctx.fill(); } }
-        } else if (kind === 'card') {   // 950 package = 4 Die: 2 compute (UMA → 1 device) + 2 IO
-          ctx.globalAlpha = 0.14 * A; rr(x, y, ws, ws, ws * 0.12); ctx.fill(); ctx.globalAlpha = A; ctx.stroke();
+        ctx.fillStyle = base;
+        if (kind === 'super') { ctx.globalAlpha = 0.85 * A; rr(x, y, ws, ws, ws * 0.16); ctx.fill(); }
+        else if (kind === 'cab') {   // upright cabinet = solid block + inset slat bands
+          const cw = ws * 0.62, cx = x + (ws - cw) / 2;
+          ctx.globalAlpha = 0.92 * A; rr(cx, y, cw, ws, ws * 0.08); ctx.fill();
+          if (px > 5) { ctx.fillStyle = DK(0.2 * A); for (let k = 0; k < 4; k++) { rr(cx + cw * 0.16, y + ws * (k + 0.5) / 4 - ws * 0.03, cw * 0.68, ws * 0.06, ws * 0.02); ctx.fill(); } }
+        } else if (kind === 'node') {   // horizontal blade = solid bar + NPU dot blocks
+          const bh = ws * 0.5, by = y + (ws - bh) / 2;
+          ctx.globalAlpha = 0.9 * A; rr(x, by, ws, bh, bh * 0.28); ctx.fill();
+          if (px > 7) { ctx.fillStyle = LT(0.55 * A); for (let d = 0; d < 8; d++) { const dx = x + ws * (0.1 + 0.8 * d / 7); ctx.beginPath(); ctx.arc(dx, y + ws / 2, ws * 0.045, 0, 7); ctx.fill(); } }
+        } else if (kind === 'card') {   // 950 package = solid card block carrying 4 Die sub-blocks
+          ctx.globalAlpha = 0.32 * A; rr(x, y, ws, ws, ws * 0.12); ctx.fill();
           if (px > 7) {
             const ins = ws * 0.13, g = ws * 0.08, dw = (ws - ins * 2 - g) / 2, dh = (ws - ins * 2 - g) / 2;
             const x0 = x + ins, x1 = x + ins + dw + g, y0 = y + ins, y1 = y + ins + dh + g;
-            ctx.fillStyle = ENTITY_COLORS.computeDie; ctx.globalAlpha = 0.5 * A;   // top row = 2 compute Die (teal, UMA)
+            ctx.fillStyle = ENTITY_COLORS.computeDie; ctx.globalAlpha = 0.92 * A;   // 2 compute Die (solid teal, UMA)
             rr(x0, y0, dw, dh, ws * 0.04); ctx.fill(); rr(x1, y0, dw, dh, ws * 0.04); ctx.fill();
-            ctx.strokeStyle = ENTITY_COLORS.computeDie; ctx.globalAlpha = 0.95 * A; ctx.lineWidth = ws * 0.05;   // UMA bridge → single device
-            ctx.beginPath(); ctx.moveTo(x0 + dw, y0 + dh / 2); ctx.lineTo(x1, y0 + dh / 2); ctx.stroke();
-            ctx.fillStyle = ENTITY_COLORS.ioDie; ctx.globalAlpha = 0.4 * A;   // bottom row = 2 IO Die (grey)
+            ctx.globalAlpha = 0.9 * A; rr(x0 + dw, y0 + dh * 0.32, g, dh * 0.36, dh * 0.12); ctx.fill();   // UMA bridge = solid block
+            ctx.fillStyle = ENTITY_COLORS.ioDie; ctx.globalAlpha = 0.62 * A;   // 2 IO Die (solid grey)
             rr(x0, y1, dw, dh, ws * 0.04); ctx.fill(); rr(x1, y1, dw, dh, ws * 0.04); ctx.fill();
-          } else {   // too small → a single compute-die hint band
-            ctx.fillStyle = ENTITY_COLORS.computeDie; ctx.globalAlpha = 0.42 * A;
+          } else {   // too small → a single solid compute-die hint band
+            ctx.fillStyle = ENTITY_COLORS.computeDie; ctx.globalAlpha = 0.7 * A;
             rr(x + ws * 0.16, y + ws * 0.22, ws * 0.68, ws * 0.3, ws * 0.05); ctx.fill();
           }
-        } else if (kind === 'die') {   // 1 compute Die (CoreGroup) = teal die + ~16 AI Core dots
-          ctx.globalAlpha = 0.22 * A; rr(x, y, ws, ws, ws * 0.12); ctx.fill(); ctx.globalAlpha = A; ctx.stroke();
-          if (px > 8) {   // AI-core array hint (4×4) on the die
-            ctx.globalAlpha = 0.85 * A;
-            for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) { const dx = x + ws * (0.18 + 0.21 * c), dy = y + ws * (0.18 + 0.21 * r); ctx.beginPath(); ctx.arc(dx, dy, ws * 0.045, 0, 7); ctx.fill(); }
-          }
-        } else if (kind === 'tile') {   // L0 Tile = SIMD/SIMT lanes (thin bars) + element
-          if (px > 4) { ctx.globalAlpha = 0.9 * A; const n = 3, bw2 = ws * 0.2, gp2 = (ws - n * bw2) / (n + 1); for (let i = 0; i < n; i++) { rr(x + gp2 + i * (bw2 + gp2), y + ws * 0.16, bw2, ws * 0.68, bw2 * 0.35); ctx.fill(); } }
-          else { ctx.globalAlpha = 0.82 * A; rr(x, y, ws, ws, ws * 0.2); ctx.fill(); }
-        } else {   // L1 AI Core = ONE independent core — Cube(cyan) or Vector(light cyan) via `base`; same glyph as 3D / DieDetail
+        } else if (kind === 'die') {   // compute Die = solid teal block + AI-core dot blocks
+          ctx.globalAlpha = 0.88 * A; rr(x, y, ws, ws, ws * 0.12); ctx.fill();
+          if (px > 8) { ctx.fillStyle = LT(0.5 * A); for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) { const dx = x + ws * (0.18 + 0.21 * c), dy = y + ws * (0.18 + 0.21 * r); ctx.beginPath(); ctx.arc(dx, dy, ws * 0.045, 0, 7); ctx.fill(); } }
+        } else if (kind === 'tile') {   // L0 Tile = solid block / filled lane bars
+          if (px > 4) { ctx.globalAlpha = 0.92 * A; const n = 3, bw2 = ws * 0.22, gp2 = (ws - n * bw2) / (n + 1); for (let i = 0; i < n; i++) { rr(x + gp2 + i * (bw2 + gp2), y + ws * 0.14, bw2, ws * 0.72, bw2 * 0.35); ctx.fill(); } }
+          else { ctx.globalAlpha = 0.85 * A; rr(x, y, ws, ws, ws * 0.2); ctx.fill(); }
+        } else {   // L1 AI Core = ONE independent core — Cube(cyan) or Vector(light cyan) via `base`; solid block
           ctx.globalAlpha = 0.9 * A; rr(x + ws * 0.12, y + ws * 0.12, ws * 0.76, ws * 0.76, ws * 0.22); ctx.fill();
         }
         ctx.globalAlpha = 1;
@@ -377,8 +378,8 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
           }
           ctx.globalAlpha = 1;
         } else if (Lv.y0 < vy1 && Lv.y0 + Lv.h > vy0) {
-          // aggregate: one fill over the whole grid panel (represents all units)
-          ctx.fillStyle = lc; ctx.globalAlpha = hi ? 0.08 : 0.5; rr(margin, Lv.y0, Wc, Lv.h, 0.2); ctx.fill(); ctx.globalAlpha = 1;
+          // aggregate: one solid fill over the whole grid panel (represents all units)
+          ctx.fillStyle = lc; ctx.globalAlpha = hi ? 0.1 : 0.62; rr(margin, Lv.y0, Wc, Lv.h, 0.2); ctx.fill(); ctx.globalAlpha = 1;
           if (hi) {   // selected range = a contiguous bright block (rows lo..hi)
             const ra = Math.floor(hi.lo[li] / Lv.cols), rb = Math.floor((hi.hi[li] - 1) / Lv.cols);
             ctx.fillStyle = SEL; ctx.globalAlpha = 0.85;
@@ -465,8 +466,8 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
           // one compute Die: solid teal, or (deeper zoom) a teal container of its ~16 AI Core
           const computeDie = (dx: number, dy: number) => {
             if (!showCore) { ctx.fillStyle = ENTITY_COLORS.computeDie; rrPath(ctx, dx, dy, dw, dh, dieR); ctx.fill(); return; }
-            ctx.fillStyle = ENTITY_COLORS.computeDie; ctx.globalAlpha = 0.22; rrPath(ctx, dx, dy, dw, dh, dieR); ctx.fill(); ctx.globalAlpha = 1;
-            ctx.strokeStyle = ENTITY_COLORS.computeDie; ctx.lineWidth = 0.6 / s; rrPath(ctx, dx, dy, dw, dh, dieR); ctx.stroke();
+            // solid teal die block carrying its ~16 independent Cube/Vector cores (no wireframe outline)
+            ctx.fillStyle = ENTITY_COLORS.computeDie; ctx.globalAlpha = 0.5; rrPath(ctx, dx, dy, dw, dh, dieR); ctx.fill(); ctx.globalAlpha = 1;
             // ≈16 AI Core (4×4) — SEPARATE Cube(cyan)/Vector(light cyan) 独立核, Cube∶Vector ≈ 8∶1 (same glyph as 3D / DieDetail)
             const cols = 4, rows = 4, pad = dw * 0.08, gxx = dw * 0.05, gyy = dh * 0.05;
             const cw = (dw - pad * 2 - gxx * (cols - 1)) / cols, ch = (dh - pad * 2 - gyy * (rows - 1)) / rows;
@@ -478,9 +479,8 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
             }
           };
           computeDie(x0, y0); computeDie(x1, y0);
-          ctx.strokeStyle = ENTITY_COLORS.computeDie; ctx.lineWidth = L.cs * 0.045;   // UMA bridge → 1 device
-          ctx.beginPath(); ctx.moveTo(x0 + dw, y0 + dh / 2); ctx.lineTo(x1, y0 + dh / 2); ctx.stroke();
-          ctx.lineWidth = 0.6 / s; ctx.strokeStyle = P.cardBd;
+          ctx.fillStyle = ENTITY_COLORS.computeDie;   // UMA bridge → 1 device (solid block, not a line)
+          rrPath(ctx, x0 + dw, y0 + dh * 0.34, gp, dh * 0.32, dh * 0.12); ctx.fill();
           ctx.fillStyle = ENTITY_COLORS.ioDie;   // 2 IO Die (grey, no compute)
           rrPath(ctx, x0, y1, dw, dh, dieR); ctx.fill(); rrPath(ctx, x1, y1, dw, dh, dieR); ctx.fill();
         }
