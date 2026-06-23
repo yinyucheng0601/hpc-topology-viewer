@@ -432,21 +432,26 @@ function NpuChip({ w, h, hovered, selected, dim, dieLabels }: { w: number; h?: n
           <Edges color={COMM_PATTERNS[2].color} lineWidth={2} />
         </mesh>
       )}
-      {/* open-source GLB swap-point (falls back to the procedural package below) */}
+      {/* package base: dedicated NPU model → else reuse the CPU package model
+          (stretched to fill the slot) → else procedural lid. The compute / IO die
+          tiles below ALWAYS draw on top, so the NPU keeps its die-level identity
+          (2 compute Die + UMA bridge + 2 IO Die) whichever package model is used. */}
       <ModelOr partId="npu-accelerator-module" size={[w, hh, w]}>
-        {/* package body (brushed metal lid) */}
-        <Slab size={[w, hh, w]} color={LC.npuBody} edgeColor={edge} metalness={0.6} roughness={0.35} />
-        {/* recessed substrate frame */}
-        <Slab size={[w * 0.92, hh * 0.12, w * 0.92]} position={[0, top, 0]} color="#23272e" metalness={0.4} roughness={0.6} />
-        {/* 2 compute Die (teal L0) — UMA-merged into one device */}
-        <Slab size={[dw, hh * 0.2, dd]} position={[lx, ty, cz]} color={LC.npuTop} emissive={L(0)} emissiveIntensity={cEm} metalness={0.6} roughness={0.32} />
-        <Slab size={[dw, hh * 0.2, dd]} position={[rx, ty, cz]} color={LC.npuTop} emissive={L(0)} emissiveIntensity={cEm} metalness={0.6} roughness={0.32} />
-        {/* UMA die-to-die bridge between the 2 compute dies (→ single device) */}
-        <Slab size={[gx * 2.4, hh * 0.22, dd * 0.36]} position={[0, ty + hh * 0.02, cz]} color={L(0)} emissive={L(0)} emissiveIntensity={0.75} />
-        {/* 2 IO Die (accent grey) */}
-        <Slab size={[dw, hh * 0.16, dd]} position={[lx, ty, iz]} color="#7c8db8" emissive="#7c8db8" emissiveIntensity={hovered ? 0.32 : 0.14} metalness={0.5} roughness={0.45} />
-        <Slab size={[dw, hh * 0.16, dd]} position={[rx, ty, iz]} color="#7c8db8" emissive="#7c8db8" emissiveIntensity={hovered ? 0.32 : 0.14} metalness={0.5} roughness={0.45} />
+        <ModelOr partId="cpu-server-package" size={[w, hh, w]} fit="stretch">
+          <Slab size={[w, hh, w]} color={LC.npuBody} edgeColor={edge} metalness={0.6} roughness={0.35} />
+        </ModelOr>
       </ModelOr>
+      {/* die layer (always procedural, mounted on the package top) */}
+      {/* recessed substrate frame */}
+      <Slab size={[w * 0.92, hh * 0.12, w * 0.92]} position={[0, top, 0]} color="#23272e" metalness={0.4} roughness={0.6} />
+      {/* 2 compute Die (teal L0) — UMA-merged into one device */}
+      <Slab size={[dw, hh * 0.2, dd]} position={[lx, ty, cz]} color={LC.npuTop} emissive={L(0)} emissiveIntensity={cEm} metalness={0.6} roughness={0.32} />
+      <Slab size={[dw, hh * 0.2, dd]} position={[rx, ty, cz]} color={LC.npuTop} emissive={L(0)} emissiveIntensity={cEm} metalness={0.6} roughness={0.32} />
+      {/* UMA die-to-die bridge between the 2 compute dies (→ single device) */}
+      <Slab size={[gx * 2.4, hh * 0.22, dd * 0.36]} position={[0, ty + hh * 0.02, cz]} color={L(0)} emissive={L(0)} emissiveIntensity={0.75} />
+      {/* 2 IO Die (accent grey) */}
+      <Slab size={[dw, hh * 0.16, dd]} position={[lx, ty, iz]} color="#7c8db8" emissive="#7c8db8" emissiveIntensity={hovered ? 0.32 : 0.14} metalness={0.5} roughness={0.45} />
+      <Slab size={[dw, hh * 0.16, dd]} position={[rx, ty, iz]} color="#7c8db8" emissive="#7c8db8" emissiveIntensity={hovered ? 0.32 : 0.14} metalness={0.5} roughness={0.45} />
       {/* optional die labels (L0 detail tier) */}
       {dieLabels && (
         <>

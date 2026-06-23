@@ -41,8 +41,10 @@ export const PARTS_CATALOG: CatalogPart[] = [
     id: 'npu-accelerator-module',
     label: 'NPU 加速模组（OAM / 夹层卡）',
     realMM: [102, 50, 165],
-    usedIn: ['节点视图', 'UB 互联层级 (L0/L1)', '邻接矩阵', '阵列全景'],
-    hint: 'Sketchfab/GrabCAD: "OAM module", "GPU accelerator module", "AI accelerator OAM" · 选 CC-BY/CC0',
+    usedIn: ['节点视图', 'UB 互联层级 (L0/L1)', '阵列全景(≤64卡)'],
+    // 暂无专用 OAM 模型：NpuChip 自动复用 cpu-server-package 作封装基座，再叠加
+    // 程序化的 2 计算 Die + UMA bridge + 2 IO Die。放入本 id 的 glb 即可顶替基座。
+    hint: '暂用 CPU 封装基座 + 程序化 die 代替。找到专用件再放：Sketchfab/GrabCAD "OAM module","AI accelerator OAM"（CC-BY/CC0）',
   },
   {
     id: 'cpu-server-package',
