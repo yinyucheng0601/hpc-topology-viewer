@@ -275,7 +275,11 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
     const dia = (x: number, y: number, r: number, c: string, lab?: string) => { ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fillStyle = P.neutral; ctx.fill(); ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.stroke(); if (lab) tx(lab, x, y + 3.5, P.ink, '10px Inter', 'center'); };
     const fbox = (x: number, y: number, w: number, h: number, fill: string, stroke?: string) => { ctx.fillStyle = fill; ctx.fillRect(x, y, w, h); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.4; ctx.strokeRect(x, y, w, h); } };
 
-    if (lens === 'heat') drawHeat(); else if (lens === 'flow') drawFlow(); else if (lens === 'domain') drawDomain(); else drawPhys();
+    // parent-context strip is SHARED by all lenses: draw once, offset each lens's top content by topY
+    const pc = parentCtx();
+    const topY = pc ? PAD + STRIP_H : PAD;
+    if (pc) drawParentStrip(pc);
+    if (lens === 'heat') drawHeat(topY); else if (lens === 'flow') drawFlow(topY); else if (lens === 'domain') drawDomain(topY); else drawPhys(topY);
 
     // parent (上一层) context: the level we drilled FROM; click a sibling to switch without going up
     function parentCtx(): { name: string; n: number; val: (i: number) => number; sel: number; kind: string; lab: (i: number) => string } | null {
@@ -300,9 +304,7 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
     }
 
     // ════════ 状态热力 ════════
-    function drawHeat() {
-      const pc = parentCtx(), topY = pc ? PAD + STRIP_H : PAD;
-      if (pc) drawParentStrip(pc);
+    function drawHeat(topY: number) {
       type Item = { val: number; kind: string; idx: number; label: string; color?: string; sub?: string };
       let items: Item[] | null = null;
       if (selLevel === 'cluster') items = Array.from({ length: pods }, (_, i) => ({ val: spodMean(i), kind: 'spod', idx: i, label: `超节点#${i + 1}` }));
@@ -356,36 +358,35 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
       tx(`全量 ${NPU_TOT.toLocaleString()} 张卡（${cols}×${rows} 节点块铺满 · 每格=1 卡）· 点击下钻节点`, PAD, H - 8, P.mut, '11px Inter');
     }
 
-    // ════════ 机柜流量：通信矩阵为主体（放大），平面带宽条收到底部一行 ════════
-    function drawFlow() {
+    // ════════ 机柜流量：带宽条在上，通信矩阵区域自适应放大为主体 ════════
+    function drawFlow(topY: number) {
       const [N, label] = flowCfg();
-      // plane utilisation → compact full-width bottom strip
-      const pbY = H - 42, pbW = (W - 2 * PAD - 3 * 12) / 4;
-      tx('平面带宽利用（随选区·随回放）', PAD, pbY - 19, P.ink2, '11px Inter');
-      planeUtil().forEach((p, i) => { const x = PAD + i * (pbW + 12); tx(p.n.split('·')[0].split('(')[0], x, pbY - 5, P.ink2, '9.5px Inter'); bar(x, pbY, pbW, 13, p.u); tx(Math.round(p.u * 100) + '%', x + pbW - 28, pbY + 11, inkOf(loadColor(p.u)), `9px ${MONO}`); });
-      // matrix = main element: as large as the area allows (square cells), centred
-      const top = PAD + 30, left = PAD + 30, matH = pbY - 28 - top, matW = W - left - PAD;
-      const cs = Math.max(2, Math.min(46, Math.floor(Math.min(matH, matW) / N)));
-      const mx = left + Math.max(0, (matW - N * cs) / 2);
-      tx(`${scopeName()} · ${label}`, left, PAD + 16, P.ink2, '13px Inter');
-      for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) { ctx.fillStyle = loadColor(tcell(i, j, N)); ctx.fillRect(mx + j * cs, top + i * cs, cs - (cs > 5 ? 1 : 0.4), cs - (cs > 5 ? 1 : 0.4)); }
+      tx(`${scopeName()} · ${label}`, PAD, topY + 16, P.ink2, '13px Inter');
+      // plane-bandwidth bars: compact row at the TOP (full width)
+      const pbY = topY + 32, pbW = (W - 2 * PAD - 3 * 12) / 4;
+      planeUtil().forEach((p, i) => { const x = PAD + i * (pbW + 12); tx(p.n.split('·')[0].split('(')[0], x, pbY - 4, P.ink2, '9.5px Inter'); bar(x, pbY, pbW, 13, p.u); tx(Math.round(p.u * 100) + '%', x + pbW - 28, pbY + 11, inkOf(loadColor(p.u)), `9px ${MONO}`); });
+      // matrix = main element, area-adaptive: fill the remaining area below the bars (square, centred)
+      const mTop = pbY + 32, mLeft = PAD + 26, matH = H - 22 - mTop, matW = W - mLeft - PAD;
+      const cs = Math.max(2, Math.min(56, Math.floor(Math.min(matH, matW) / N)));
+      const m = N * cs, mx = mLeft + Math.max(0, (matW - m) / 2), my = mTop + Math.max(0, (matH - m) / 2);
+      for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) { ctx.fillStyle = loadColor(tcell(i, j, N)); ctx.fillRect(mx + j * cs, my + i * cs, cs - (cs > 5 ? 1 : 0.4), cs - (cs > 5 ? 1 : 0.4)); }
       const lab = N <= 8 ? 1 : N <= 32 ? 4 : 16;
-      for (let i = 0; i < N; i += lab) { tx('' + (i + 1), mx + i * cs, top - 3, P.mut, `9px ${MONO}`); tx('' + (i + 1), mx - 22, top + i * cs + cs - 1, P.mut, `9px ${MONO}`); }
-      tx('行/列 = 通信单元 · 对角=内部通信 · 颜色=通信强度(状态色)' + (SUBCARD.includes(selLevel) ? ' · 卡内片上 NoC 无跨卡矩阵，显示所属节点' : ''), left, top + N * cs + 16, P.mut, '10.5px Inter');
+      for (let i = 0; i < N; i += lab) { tx('' + (i + 1), mx + i * cs, my - 3, P.mut, `9px ${MONO}`); tx('' + (i + 1), mx - 22, my + i * cs + cs - 1, P.mut, `9px ${MONO}`); }
+      tx('行/列 = 通信单元 · 对角=内部通信 · 颜色=通信强度(状态色)' + (SUBCARD.includes(selLevel) ? ' · 卡内片上 NoC 无跨卡矩阵，显示所属节点' : ''), mLeft, H - 8, P.mut, '10.5px Inter');
     }
 
     // ════════ 通信域：每个并行维度画真实集合通信图元 ════════
-    function drawDomain() {
-      tx(`通信域(进程↔进程) · ${scopeName()} · 进程 = rank = 1 NPU（硬件↔进程 1:1）`, PAD, PAD + 16, P.ink2, '12.5px Inter');
+    function drawDomain(topY: number) {
+      tx(`通信域(进程↔进程) · ${scopeName()} · 进程 = rank = 1 NPU（硬件↔进程 1:1）`, PAD, topY + 16, P.ink2, '12.5px Inter');
       const onchip = SUBCARD.includes(selLevel);
       const lvlNote = onchip ? '已下钻到卡内：设备内并行 = block_idx / SPMD（核实例），非 rank 间集合通信'
         : selLevel === 'node' ? `本节点 ${NPN} rank = 1 TP 组（域内 AllReduce）`
         : selLevel === 'cab' ? `本机柜 ${NPC} rank = 1 EP 组（All-to-All 域）`
         : selLevel === 'cluster' ? `每超节点 = 1 个 DP 副本（跨超节点 AllReduce）`
         : `本超节点：TP/EP 在域内、DP/PP 跨域`;
-      tx(lvlNote + ' · 图元=集合通信形态、颜色=状态、回放时按方向流动', PAD, PAD + 34, P.mut, '10.5px Inter');
+      tx(lvlNote + ' · 图元=集合通信形态、颜色=状态、回放时按方向流动', PAD, topY + 34, P.mut, '10.5px Inter');
       const D = domains(), act = domActive();
-      const top = PAD + 48, rh = (H - top - 12) / D.length;
+      const top = topY + 48, rh = (H - top - 12) / D.length;
       // collective-pattern glyph among k representative ranks
       const glyph = (cx: number, cy: number, rad: number, pat: 'ring' | 'a2a' | 'p2p', col: string, on: boolean) => {
         const k = pat === 'p2p' ? 5 : 7;
@@ -421,18 +422,18 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
     }
 
     // ════════ 物理链路：结构随层级、每个器件/链路按自身负载上色（随回放变化）、数量真实 ════════
-    function drawPhys() {
+    function drawPhys(topY: number) {
       const Pl = planeUtil();
       // plane-utilisation bars along the bottom (full width, time-varying)
       const pbY = H - 46, pbW = (W - 2 * PAD - 3 * 12) / 4;
       Pl.forEach((p, i) => { const x = PAD + i * (pbW + 12); tx(p.n.split('·')[0].split('(')[0], x, pbY - 5, P.ink2, '9.5px Inter'); bar(x, pbY, pbW, 13, p.u); tx(Math.round(p.u * 100) + '%', x + pbW - 28, pbY + 11, inkOf(loadColor(p.u)), `9px ${MONO}`); });
 
       // 卡(rank) 及以下 = 卡内/片上视图（每层不同结构）；节点及以上 = 中心交换 + 子单元
-      if (selLevel === 'rank' || SUBCARD.includes(selLevel)) { drawChip(Pl); return; }
-      tx(`物理链路 · ${scopeName()} · 器件/链路按各自负载上色 · 随回放变化`, PAD, PAD + 16, P.ink2, '12.5px Inter');
+      if (selLevel === 'rank' || SUBCARD.includes(selLevel)) { drawChip(Pl, topY); return; }
+      tx(`物理链路 · ${scopeName()} · 器件/链路按各自负载上色 · 随回放变化`, PAD, topY + 16, P.ink2, '12.5px Inter');
 
       // hub + child units (the real count), each coloured by its OWN load
-      const cx = W / 2, hubY = PAD + 64, areaTop = hubY + 40, areaBot = pbY - 28;
+      const cx = W / 2, hubY = topY + 64, areaTop = hubY + 40, areaBot = pbY - 28;
       const hubU = selLevel === 'cluster' ? Pl[1].u : Pl[0].u;
       const hubLab = selLevel === 'cluster' ? 'RoCE' : selLevel === 'super' ? 'UB-Mesh' : selLevel === 'cab' ? 'L2' : 'L1';
       const cfg = selLevel === 'cluster' ? { N: pods, val: (i: number) => spodMean(i), unit: '超节点', plane: PLANES[1] }
@@ -484,11 +485,11 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
       }
     }
     // 卡内/片上物理视图 —— 每层不同：rank=整卡(4 Die) · die=2 计算Die(核组/NoC) · core=AI Core 阵列 · tile=单核内部
-    function drawChip(Pl: { u: number }[]) {
-      const pbY = H - 42, cx = W / 2, top = PAD + 40, bot = pbY - 38;
+    function drawChip(Pl: { u: number }[], topY: number) {
+      const pbY = H - 42, cx = W / 2, top = topY + 40, bot = pbY - 38;
       if (selLevel === 'tile') { drawTile(top, bot); return; }
       const isRank = selLevel === 'rank', isDie = selLevel === 'die', isCore = selLevel === 'core';
-      tx(`物理链路 · ${scopeName()} · ${isRank ? '整卡：2 计算 Die(UMA) + 2 IO Die + 端口' : isDie ? '计算 Die（核组 / 片上 NoC）' : 'AI Core 阵列（Cube/Vector）'}`, PAD, PAD + 16, P.ink2, '12.5px Inter');
+      tx(`物理链路 · ${scopeName()} · ${isRank ? '整卡：2 计算 Die(UMA) + 2 IO Die + 端口' : isDie ? '计算 Die（核组 / 片上 NoC）' : 'AI Core 阵列（Cube/Vector）'}`, PAD, top - 24, P.ink2, '12.5px Inter');
       const dv0 = dieVal(0), dv1 = dieVal(1), gap = 56;
       const dieW = Math.min(isRank ? 200 : 300, (W - 2 * PAD - gap - 80) / 2);
       const dieH = Math.min(isRank ? (bot - top) * 0.46 : bot - top - 20, 340);
@@ -527,7 +528,7 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
     // 单 AI Core 内部：Cube/Vector ALU + L0A/L0B/L0C buffer + SIMD/SIMT lane（L0 Tile 粒度）
     function drawTile(top: number, bot: number) {
       const isVec = selCore % 8 === 7, base = coreVal(selCore);
-      tx(`物理链路 · ${scopeName()} · 单 AI Core 内部（${isVec ? 'AIV/Vector' : 'AIC/Cube'} #${selCore}）`, PAD, PAD + 16, P.ink2, '12.5px Inter');
+      tx(`物理链路 · ${scopeName()} · 单 AI Core 内部（${isVec ? 'AIV/Vector' : 'AIC/Cube'} #${selCore}）`, PAD, top - 24, P.ink2, '12.5px Inter');
       const x0 = PAD + 20, w = W - 2 * PAD - 40, h = bot - top;
       fbox(x0, top, w, h, P.neutral, ENTITY_COLORS.computeDie);
       const aluW = w * 0.34, aluH = h * 0.42;           // ALU block
