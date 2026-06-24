@@ -1200,8 +1200,9 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
         style={{ display: 'block', cursor: drag.current ? 'grabbing' : layout === 'top' ? 'crosshair' : 'pointer', touchAction: 'none' }}
         onWheel={onWheel} onPointerDown={onDown} onPointerUp={onUp} onPointerMove={onMove} onPointerLeave={onLeave}
       />
-      {/* main toolbar: layout tabs — top-center */}
-      <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: 'var(--panel)', border: '1px solid var(--bd)', borderRadius: 12, boxShadow: 'var(--shadow)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', zIndex: 12, maxWidth: 'calc(100vw - 24px)' }}>
+      {/* toolbar: layout tabs + action buttons side-by-side (并列·各自独立 pill), top-center */}
+      <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 10, zIndex: 12, maxWidth: 'calc(100vw - 24px)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: 'var(--panel)', border: '1px solid var(--bd)', borderRadius: 12, boxShadow: 'var(--shadow)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
         <span style={{ ...LBL }}>布局</span>
         {([['devices', '器件互联'], ['layers', '层级图'], ['top', '顶视图']] as [typeof layout, string][]).map(([id, lb]) => {
           const on = layout === id;
@@ -1210,8 +1211,8 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
             style={{ padding: '4px 11px', fontSize: 11.5, borderRadius: 7, cursor: 'pointer', ...navBtn(on) }}>{lb}</button>;
         })}
       </div>
-      {/* action buttons: separate centered bar below the tabs (按钮单独显示) */}
-      <div style={{ position: 'absolute', top: 54, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 6, padding: '5px 10px', background: 'var(--panel)', border: '1px solid var(--bd)', borderRadius: 10, boxShadow: 'var(--shadow-sm)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', zIndex: 12, maxWidth: 'calc(100vw - 24px)' }}>
+      {/* action buttons: own pill, beside the tabs (按钮单独显示·并列) */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 6, padding: '5px 10px', background: 'var(--panel)', border: '1px solid var(--bd)', borderRadius: 10, boxShadow: 'var(--shadow-sm)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
         {layout === 'top' && (
           <>
             <span style={{ ...LBL }}>上色</span>
@@ -1236,6 +1237,7 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
         })}
         <button onClick={() => setPlaying((v) => !v)} title="播放 / 暂停 执行时序（节点按状态变色 + 连线/数据流动 + swimlane/右侧面板同步）"
           style={{ padding: '4px 11px', fontSize: 11.5, borderRadius: 7, cursor: 'pointer', ...navBtn(playing) }}>{playing ? '⏸ 时序播放中' : '▶ 播放时序'}</button>
+      </div>
       </div>
       {/* legend (collapsible — avoids occluding the diagram / swimlane on small screens) */}
       <div style={{ position: 'absolute', bottom: 12, left: 12, maxWidth: 'min(420px, calc(100vw - 24px))', padding: '7px 11px', fontSize: 11, background: 'var(--panel)', border: '1px solid var(--bd)', borderRadius: 10, boxShadow: 'var(--shadow-sm)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', lineHeight: 1.6, color: 'var(--tx2)' }}>
