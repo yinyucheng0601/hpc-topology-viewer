@@ -268,7 +268,7 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
     ctx.fillStyle = P.bg; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = P.grid; for (let gx = 14; gx < W; gx += 22) for (let gy = 14; gy < H; gy += 22) { ctx.beginPath(); ctx.arc(gx, gy, 0.9, 0, 7); ctx.fill(); }
     cells.current = [];
-    const PAD = 16;
+    const PAD = 16, STRIP_H = 54;   // STRIP_H = parent-context strip height (heat lens)
     const tx = (s: string, x: number, y: number, c: string, f = '11px Inter', a: CanvasTextAlign = 'left') => { ctx.fillStyle = c; ctx.font = f; ctx.textAlign = a; ctx.fillText(s, x, y); ctx.textAlign = 'left'; };
     const bar = (x: number, y: number, w: number, h: number, u: number, c?: string) => { ctx.fillStyle = P.track; ctx.fillRect(x, y, w, h); ctx.fillStyle = c ?? loadColor(u); ctx.fillRect(x, y, w * u, h); };
     const line = (x1: number, y1: number, x2: number, y2: number, c: string, w: number, dash = false) => { ctx.save(); ctx.strokeStyle = c; ctx.lineWidth = w; ctx.lineCap = 'round'; if (dash) { ctx.setLineDash([6, 5]); ctx.lineDashOffset = -step * 3; } ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.restore(); };
@@ -277,8 +277,32 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
 
     if (lens === 'heat') drawHeat(); else if (lens === 'flow') drawFlow(); else if (lens === 'domain') drawDomain(); else drawPhys();
 
+    // parent (上一层) context: the level we drilled FROM; click a sibling to switch without going up
+    function parentCtx(): { name: string; n: number; val: (i: number) => number; sel: number; kind: string; lab: (i: number) => string } | null {
+      if (selLevel === 'super' || selLevel === 'rank') return { name: '集群 · 超节点', n: pods, val: (i) => spodMean(i), sel: selSpod, kind: 'pspod', lab: (i) => '超' + (i + 1) };
+      if (selLevel === 'cab') return { name: `超节点#${selSpod + 1} · 机柜`, n: CAB, val: (i) => cabMean(selSpod, i), sel: selCab, kind: 'pcab', lab: (i) => '' + (i + 1) };
+      if (selLevel === 'node') { const cb = (selNode / NODES_PER_CAB) | 0; return { name: `机柜${cb + 1} · 节点`, n: NODES_PER_CAB, val: (i) => nodeMean(selSpod, cb * NODES_PER_CAB + i), sel: selNode - cb * NODES_PER_CAB, kind: 'pnode', lab: (i) => 'N' + (i + 1) }; }
+      if (SUBCARD.includes(selLevel)) return { name: `节点${(selNode % NODES_PER_CAB) + 1} · 卡(rank)`, n: NPN, val: (i) => util01(selSpod, selNode, i), sel: cardJ, kind: 'pcard', lab: (i) => 'r' + i };
+      return null;   // cluster: no parent
+    }
+    function drawParentStrip(pc: NonNullable<ReturnType<typeof parentCtx>>) {
+      tx(`上层 · ${pc.name}（高亮=当前选区 · 点击切换同级）`, PAD, PAD + 11, P.ink2, '11px Inter');
+      const y = PAD + 18, h = 26, gap = pc.n > 48 ? 1 : 2;
+      const cw = (W - 2 * PAD - (pc.n - 1) * gap) / pc.n;
+      for (let i = 0; i < pc.n; i++) {
+        const x = PAD + i * (cw + gap), v = pc.val(i);
+        fbox(x, y, Math.max(1, cw), h, loadColor(v));
+        if (i === pc.sel) { ctx.strokeStyle = ACCENT; ctx.lineWidth = 2.5; ctx.strokeRect(x + 1.25, y + 1.25, cw - 2.5, h - 2.5); }
+        if (cw >= 24) tx(pc.lab(i), x + cw / 2, y + h / 2 + 3.5, inkOf(loadColor(v)), '9px Inter', 'center');
+        cells.current.push({ x, y, w: Math.max(1, cw), h, kind: pc.kind, idx: i });
+      }
+      line(PAD, PAD + STRIP_H - 6, W - PAD, PAD + STRIP_H - 6, P.frame, 1);
+    }
+
     // ════════ 状态热力 ════════
     function drawHeat() {
+      const pc = parentCtx(), topY = pc ? PAD + STRIP_H : PAD;
+      if (pc) drawParentStrip(pc);
       type Item = { val: number; kind: string; idx: number; label: string; color?: string; sub?: string };
       let items: Item[] | null = null;
       if (selLevel === 'cluster') items = Array.from({ length: pods }, (_, i) => ({ val: spodMean(i), kind: 'spod', idx: i, label: `超节点#${i + 1}` }));
@@ -291,15 +315,15 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
       ];
       else if (selLevel === 'core') items = Array.from({ length: CORES_PER_CARD }, (_, c) => ({ val: coreVal(c), kind: 'corec', idx: c, label: c % 8 === 7 ? `AIV${c}` : `AIC${c}`, sub: c % 8 === 7 ? 'Vector' : 'Cube' }));
       else if (selLevel === 'tile') items = Array.from({ length: TILES_VIEW }, (_, t) => ({ val: tileVal(t), kind: 'tilec', idx: t, label: '' }));
-      if (items) { drawUniform(items); return; }
-      drawFull();   // rank → 全量铺开
+      if (items) { drawUniform(items, topY); return; }
+      drawFull(topY);   // rank → 全量铺开（铺满）
     }
-    function drawUniform(items: { val: number; kind: string; idx: number; label: string; color?: string; sub?: string }[]) {
+    function drawUniform(items: { val: number; kind: string; idx: number; label: string; color?: string; sub?: string }[], topY: number) {
       const n = items.length, cols = n <= 4 ? 2 : n <= 16 ? 4 : n <= 64 ? 8 : Math.ceil(Math.sqrt(n * 1.6));
       const rows = Math.ceil(n / cols), GP = 6;
-      const cw = (W - 2 * PAD - (cols - 1) * GP) / cols, ch = (H - 2 * PAD - (rows - 1) * GP) / rows;
+      const cw = (W - 2 * PAD - (cols - 1) * GP) / cols, ch = (H - topY - PAD - (rows - 1) * GP) / rows;
       items.forEach((it, i) => {
-        const c = i % cols, r = (i / cols) | 0, x = PAD + c * (cw + GP), y = PAD + r * (ch + GP);
+        const c = i % cols, r = (i / cols) | 0, x = PAD + c * (cw + GP), y = topY + r * (ch + GP);
         const fill = it.color ?? loadColor(it.val);
         fbox(x, y, cw, ch, fill);
         const picked = (it.kind === 'npuc' && it.idx === selNpu) || (it.kind === 'corec' && it.idx === selCore);
@@ -308,44 +332,46 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
         if (cw >= 58 && ch >= 26) {
           tx(it.label, x + 10, y + 22, ink, '600 13px Inter');
           if (it.color) tx(it.sub ?? '', x + 10, y + 40, ink, '10px Inter');
-          else tx(Math.round(it.val * 100) + '%', x + 10, y + (it.sub && ch >= 56 ? 42 : 42), ink, `15px ${MONO}`);
+          else tx(Math.round(it.val * 100) + '%', x + 10, y + 42, ink, `15px ${MONO}`);
           if (it.sub && !it.color && ch >= 64) tx(it.sub, x + 10, y + 60, ink, '10px Inter');
         } else if (cw >= 26 && ch >= 18) tx(it.label || (Math.round(it.val * 100) + ''), x + 4, y + 14, ink, '9px Inter');
         cells.current.push({ x, y, w: cw, h: ch, kind: it.kind, idx: it.idx });
       });
     }
-    function drawFull() {
-      const PERROW = Math.min(NODES, Math.max(8, Math.round(Math.sqrt(NODES * 2.2))));
-      const gridRows = Math.ceil(NODES / PERROW);
-      const availH = H - 2 * PAD - 16;
-      const cs = Math.max(2, Math.min(10, Math.floor(Math.min((W - 2 * PAD) / (PERROW * 5), availH / (gridRows * 3)))));
-      const nbw = 4 * cs, nbh = 2 * cs, sx = nbw + cs, sy = nbh + cs;
-      const usedW = PERROW * sx - cs, usedH = gridRows * sy - cs;
-      const x0 = PAD + Math.max(0, (W - 2 * PAD - usedW) / 2), y0 = PAD + Math.max(0, (availH - usedH) / 2);
+    // 全量铺满：每节点=4×2 卡块；按可用区长宽比选列数，cell 尺寸填满（容许很小）
+    function drawFull(topY: number) {
+      const availW = W - 2 * PAD, availH = H - topY - PAD - 16;
+      const cols = Math.max(8, Math.min(NODES, Math.round(Math.sqrt(0.6 * NODES * availW / Math.max(1, availH)))));
+      const rows = Math.ceil(NODES / cols);
+      const cs = Math.max(1.5, Math.min(availW / (cols * 5), availH / (rows * 3)));
+      const sx = 5 * cs, sy = 3 * cs, cg = Math.max(0.8, cs - 0.4);
+      const usedW = cols * sx - cs, usedH = rows * sy - cs;
+      const x0 = PAD + Math.max(0, (availW - usedW) / 2), y0 = topY + Math.max(0, (availH - usedH) / 2);
       for (let gn = 0; gn < NODES; gn++) {
-        const nx = x0 + (gn % PERROW) * sx, ny = y0 + ((gn / PERROW) | 0) * sy;
-        for (let j = 0; j < NPN; j++) { ctx.fillStyle = loadColor(metricVal(selSpod, gn, j)); ctx.fillRect(nx + (j % 4) * cs, ny + ((j / 4) | 0) * cs, cs - 0.6, cs - 0.6); }
-        if (gn === selNode) { ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.8; ctx.strokeRect(nx - 1.5, ny - 1.5, nbw + 1, nbh + 1); }
-        cells.current.push({ x: nx, y: ny, w: nbw, h: nbh, kind: 'rankfull', idx: gn });
+        const nx = x0 + (gn % cols) * sx, ny = y0 + ((gn / cols) | 0) * sy;
+        for (let j = 0; j < NPN; j++) { ctx.fillStyle = loadColor(metricVal(selSpod, gn, j)); ctx.fillRect(nx + (j % 4) * cs, ny + ((j / 4) | 0) * cs, cg, cg); }
+        if (gn === selNode) { ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.6; ctx.strokeRect(nx - 1.2, ny - 1.2, 4 * cs, 2 * cs); }
+        cells.current.push({ x: nx, y: ny, w: 4 * cs, h: 2 * cs, kind: 'rankfull', idx: gn });
       }
-      tx(`全量 ${NPU_TOT.toLocaleString()} 张卡（每小块=1 节点=8 NPU · 每格=1 卡）· 点击下钻节点`, PAD, H - 8, P.mut, '11px Inter');
+      tx(`全量 ${NPU_TOT.toLocaleString()} 张卡（${cols}×${rows} 节点块铺满 · 每格=1 卡）· 点击下钻节点`, PAD, H - 8, P.mut, '11px Inter');
     }
 
-    // ════════ 机柜流量 ════════
+    // ════════ 机柜流量：通信矩阵为主体（放大），平面带宽条收到底部一行 ════════
     function drawFlow() {
       const [N, label] = flowCfg();
-      const left = PAD + 28, top = PAD + 26;
-      const matMax = Math.min(H - top - 36, W * 0.5);
-      const cs = Math.max(2, Math.min(30, Math.floor(matMax / N)));
-      tx(`${scopeName()} · ${label}`, left, top - 10, P.ink2, '12.5px Inter');
-      for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) { ctx.fillStyle = loadColor(tcell(i, j, N)); ctx.fillRect(left + j * cs, top + i * cs, cs - (cs > 5 ? 1 : 0.4), cs - (cs > 5 ? 1 : 0.4)); }
+      // plane utilisation → compact full-width bottom strip
+      const pbY = H - 42, pbW = (W - 2 * PAD - 3 * 12) / 4;
+      tx('平面带宽利用（随选区·随回放）', PAD, pbY - 19, P.ink2, '11px Inter');
+      planeUtil().forEach((p, i) => { const x = PAD + i * (pbW + 12); tx(p.n.split('·')[0].split('(')[0], x, pbY - 5, P.ink2, '9.5px Inter'); bar(x, pbY, pbW, 13, p.u); tx(Math.round(p.u * 100) + '%', x + pbW - 28, pbY + 11, inkOf(loadColor(p.u)), `9px ${MONO}`); });
+      // matrix = main element: as large as the area allows (square cells), centred
+      const top = PAD + 30, left = PAD + 30, matH = pbY - 28 - top, matW = W - left - PAD;
+      const cs = Math.max(2, Math.min(46, Math.floor(Math.min(matH, matW) / N)));
+      const mx = left + Math.max(0, (matW - N * cs) / 2);
+      tx(`${scopeName()} · ${label}`, left, PAD + 16, P.ink2, '13px Inter');
+      for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) { ctx.fillStyle = loadColor(tcell(i, j, N)); ctx.fillRect(mx + j * cs, top + i * cs, cs - (cs > 5 ? 1 : 0.4), cs - (cs > 5 ? 1 : 0.4)); }
       const lab = N <= 8 ? 1 : N <= 32 ? 4 : 16;
-      for (let i = 0; i < N; i += lab) { tx('' + (i + 1), left + i * cs, top - 2, P.mut, `9px ${MONO}`); tx('' + (i + 1), left - 24, top + i * cs + cs - 1, P.mut, `9px ${MONO}`); }
-      tx('行/列 = 通信单元 · 对角=内部 · 颜色=通信强度(状态色)', left, top + N * cs + 18, P.mut, '10.5px Inter');
-      if (SUBCARD.includes(selLevel)) tx('（已下钻到卡内：片上 NoC 无跨卡通信矩阵，显示所属节点）', left, top + N * cs + 34, P.mut, '10px Inter');
-      const bx = left + N * cs + 54, bw = Math.max(140, W - bx - PAD - 10);
-      tx('平面带宽利用（随选区·随回放）', bx, top - 10, P.ink2, '12.5px Inter');
-      planeUtil().forEach((p, i) => { const y = top + 16 + i * 60; tx(p.n, bx, y - 6, P.ink2, '11px Inter'); bar(bx, y, bw, 18, p.u); tx(Math.round(p.u * 100) + '%', bx + bw - 32, y + 13, inkOf(loadColor(p.u)), `11px ${MONO}`); });
+      for (let i = 0; i < N; i += lab) { tx('' + (i + 1), mx + i * cs, top - 3, P.mut, `9px ${MONO}`); tx('' + (i + 1), mx - 22, top + i * cs + cs - 1, P.mut, `9px ${MONO}`); }
+      tx('行/列 = 通信单元 · 对角=内部通信 · 颜色=通信强度(状态色)' + (SUBCARD.includes(selLevel) ? ' · 卡内片上 NoC 无跨卡矩阵，显示所属节点' : ''), left, top + N * cs + 16, P.mut, '10.5px Inter');
     }
 
     // ════════ 通信域：每个并行维度画真实集合通信图元 ════════
@@ -397,12 +423,13 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
     // ════════ 物理链路：结构随层级、每个器件/链路按自身负载上色（随回放变化）、数量真实 ════════
     function drawPhys() {
       const Pl = planeUtil();
-      tx(`物理链路 · ${scopeName()} · 器件/链路按各自负载上色 · 随回放变化`, PAD, PAD + 16, P.ink2, '12.5px Inter');
       // plane-utilisation bars along the bottom (full width, time-varying)
       const pbY = H - 46, pbW = (W - 2 * PAD - 3 * 12) / 4;
       Pl.forEach((p, i) => { const x = PAD + i * (pbW + 12); tx(p.n.split('·')[0].split('(')[0], x, pbY - 5, P.ink2, '9.5px Inter'); bar(x, pbY, pbW, 13, p.u); tx(Math.round(p.u * 100) + '%', x + pbW - 28, pbY + 11, inkOf(loadColor(p.u)), `9px ${MONO}`); });
 
-      if (SUBCARD.includes(selLevel)) { drawChip(Pl); return; }
+      // 卡(rank) 及以下 = 卡内/片上视图（每层不同结构）；节点及以上 = 中心交换 + 子单元
+      if (selLevel === 'rank' || SUBCARD.includes(selLevel)) { drawChip(Pl); return; }
+      tx(`物理链路 · ${scopeName()} · 器件/链路按各自负载上色 · 随回放变化`, PAD, PAD + 16, P.ink2, '12.5px Inter');
 
       // hub + child units (the real count), each coloured by its OWN load
       const cx = W / 2, hubY = PAD + 64, areaTop = hubY + 40, areaBot = pbY - 28;
@@ -413,7 +440,7 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
         : selLevel === 'cab' ? { N: NODES_PER_CAB, val: (i: number) => nodeMean(selSpod, selCab * NODES_PER_CAB + i), unit: '节点', plane: PLANES[0] }
         : { N: NPN, val: (i: number) => util01(selSpod, selNode, i), unit: 'NPU', plane: PLANES[0] };
       dia(cx, hubY, 26, loadColor(hubU), hubLab);
-      const isNode = selLevel === 'node' || selLevel === 'rank';
+      const isNode = selLevel === 'node';
 
       if (cfg.N <= 16) {
         // big boxes filling the width, each linked to the hub by a line coloured by its load
@@ -456,40 +483,61 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
         tx(`${cfg.N.toLocaleString()} 个 ${cfg.unit}（真实数量）· 经 ${hubLab} UB-Mesh any-to-any（抽样连线）· 每格=1 ${cfg.unit}、颜色=负载`, PAD, areaBot + 14, P.mut, '10px Inter');
       }
     }
-    // on-chip physical view: 2 compute Die (UMA) + 2 IO Die + HBM + D2D + UB/RDMA ports
+    // 卡内/片上物理视图 —— 每层不同：rank=整卡(4 Die) · die=2 计算Die(核组/NoC) · core=AI Core 阵列 · tile=单核内部
     function drawChip(Pl: { u: number }[]) {
-      const cx = W / 2, top = PAD + 56, bot = H - 60, midY = (top + bot) / 2;
-      const dieW = Math.min(220, (W - 2 * PAD - 120) / 2), dieH = Math.min(220, bot - top - 40);
-      const gap = 56, lx = cx - gap / 2 - dieW, rx = cx + gap / 2;
-      const dv0 = dieVal(0), dv1 = dieVal(1);
-      // compute dies
-      [{ x: lx, v: dv0, d: 0 }, { x: rx, v: dv1, d: 1 }].forEach(({ x, v, d }) => {
-        fbox(x, top, dieW, dieH, loadColor(v), ENTITY_COLORS.computeDie);
-        tx(`计算 Die ${d}`, x + dieW / 2, top - 8, P.ink2, '11px Inter', 'center');
-        tx(Math.round(v * 100) + '%', x + dieW / 2, top + 20, inkOf(loadColor(v)), `13px ${MONO}`, 'center');
-        if (selLevel === 'core' || selLevel === 'tile') {
-          // 16 AI Core per compute die, coloured by coreVal
-          const per = CORES_PER_CARD / 2, cc = 4, cr = per / cc;
-          const iw = (dieW - 24) / cc, ih = (dieH - 44) / cr;
+      const pbY = H - 42, cx = W / 2, top = PAD + 40, bot = pbY - 38;
+      if (selLevel === 'tile') { drawTile(top, bot); return; }
+      const isRank = selLevel === 'rank', isDie = selLevel === 'die', isCore = selLevel === 'core';
+      tx(`物理链路 · ${scopeName()} · ${isRank ? '整卡：2 计算 Die(UMA) + 2 IO Die + 端口' : isDie ? '计算 Die（核组 / 片上 NoC）' : 'AI Core 阵列（Cube/Vector）'}`, PAD, PAD + 16, P.ink2, '12.5px Inter');
+      const dv0 = dieVal(0), dv1 = dieVal(1), gap = 56;
+      const dieW = Math.min(isRank ? 200 : 300, (W - 2 * PAD - gap - 80) / 2);
+      const dieH = Math.min(isRank ? (bot - top) * 0.46 : bot - top - 20, 340);
+      const lx = cx - gap / 2 - dieW, rx = cx + gap / 2, dyTop = top + 14;
+      const drawComputeDie = (x: number, v: number, d: number) => {
+        fbox(x, dyTop, dieW, dieH, loadColor(v), ENTITY_COLORS.computeDie);
+        tx(`计算 Die ${d} · ${Math.round(v * 100)}%`, x + dieW / 2, dyTop - 6, P.ink2, '11px Inter', 'center');
+        if (isCore) {                                   // 16 AI Core/die, coloured by coreVal, click→tile
+          const per = CORES_PER_CARD / 2, cc = 4, cr = per / cc, iw = (dieW - 20) / cc, ih = (dieH - 36) / cr;
           for (let k = 0; k < per; k++) {
-            const gi = d * per + k, c = k % cc, r = (k / cc) | 0, x2 = x + 12 + c * iw, y2 = top + 32 + r * ih, v2 = coreVal(gi);
+            const gi = d * per + k, c = k % cc, r = (k / cc) | 0, x2 = x + 10 + c * iw, y2 = dyTop + 26 + r * ih, v2 = coreVal(gi);
             fbox(x2 + 1, y2 + 1, iw - 3, ih - 3, loadColor(v2), gi === selCore ? ACCENT : undefined);
-            if (iw > 30) tx(gi % 8 === 7 ? 'V' : 'C', x2 + iw / 2, y2 + ih / 2 + 3, inkOf(loadColor(v2)), '9px Inter', 'center');
+            if (iw > 26) tx(gi % 8 === 7 ? 'V' : 'C', x2 + iw / 2, y2 + ih / 2 + 3, inkOf(loadColor(v2)), '9px Inter', 'center');
             cells.current.push({ x: x2, y: y2, w: iw, h: ih, kind: 'corec', idx: gi });
           }
+        } else if (isDie) {                             // NoC mesh hint + core count (no individual cores)
+          const mc = inkOf(loadColor(v)); ctx.globalAlpha = 0.28;
+          for (let g = 1; g < 4; g++) { line(x + g * dieW / 4, dyTop + 24, x + g * dieW / 4, dyTop + dieH - 8, mc, 1); line(x + 8, dyTop + 24 + g * (dieH - 32) / 4, x + dieW - 8, dyTop + 24 + g * (dieH - 32) / 4, mc, 1); }
+          ctx.globalAlpha = 1; tx('≈16 AI Core · 片上 NoC', x + dieW / 2, dyTop + dieH / 2 + 4, mc, '11px Inter', 'center');
         }
-        // HBM stack beside each die
-        const hbx = d === 0 ? x - 26 : x + dieW + 6;
-        for (let s = 0; s < 4; s++) fbox(hbx, top + 8 + s * (dieH / 4 - 4), 20, dieH / 4 - 8, P.neutral, ENTITY_COLORS.ioDie);
-        tx('HBM', hbx + 10, bot + 2, P.mut, '8px Inter', 'center');
-      });
-      // UMA / D2D bridge between compute dies
-      fbox(cx - gap / 2 + 4, midY - 8, gap - 8, 16, loadColor((dv0 + dv1) / 2));
-      tx('D2D 784GB/s', cx, midY - 14, P.mut, '8.5px Inter', 'center');
-      // UB / RDMA ports at the very bottom of each die (plane-coloured)
-      fbox(lx + dieW / 2 - 30, bot + 8, 26, 12, loadColor(Pl[0].u)); tx('UB口', lx + dieW / 2 - 17, bot + 30, PLANES[0].color, '8.5px Inter', 'center');
-      fbox(lx + dieW / 2 + 6, bot + 8, 26, 12, loadColor(Pl[1].u)); tx('RDMA口', lx + dieW / 2 + 19, bot + 30, PLANES[1].color, '8.5px Inter', 'center');
-      tx(`1 卡 = 2 计算 Die(UMA·OS 视为单 device) + ${IO_DIES_PER_CARD} IO Die · 对外 UB口(绿)/RDMA口(橙) · ${selLevel === 'tile' ? `核 ${selCore} 的 L0 tile/lane 见热力镜头` : '点 Die/Core 看热力'}`, PAD, H - 8, P.mut, '10px Inter');
+        const hbx = d === 0 ? x - 24 : x + dieW + 4;    // HBM beside
+        for (let s = 0; s < 4; s++) fbox(hbx, dyTop + s * (dieH / 4), 18, dieH / 4 - 4, P.neutral, ENTITY_COLORS.ioDie);
+        tx('HBM', hbx + 9, dyTop + dieH + 12, P.mut, '8px Inter', 'center');
+      };
+      drawComputeDie(lx, dv0, 0); drawComputeDie(rx, dv1, 1);
+      fbox(cx - gap / 2 + 4, dyTop + dieH / 2 - 8, gap - 8, 16, loadColor((dv0 + dv1) / 2));   // D2D / UMA bridge
+      tx('D2D 784GB/s · UMA', cx, dyTop + dieH / 2 - 13, P.mut, '8.5px Inter', 'center');
+      if (isRank) {                                     // whole card → also 2 IO Die + UB/RDMA ports
+        const ioY = dyTop + dieH + 22, ioH = Math.max(22, bot - ioY - 6);
+        [{ x: lx, d: 0 }, { x: rx, d: 1 }].forEach(({ x, d }) => { fbox(x, ioY, dieW, ioH, P.neutral, ENTITY_COLORS.ioDie); tx(`IO Die ${d} · 互联/IO`, x + dieW / 2, ioY + ioH / 2 + 3, P.ink2, '10px Inter', 'center'); });
+        fbox(lx + dieW / 2 - 30, bot - 14, 26, 12, loadColor(Pl[0].u)); tx('UB口', lx + dieW / 2 - 17, bot + 2, PLANES[0].color, '8.5px Inter', 'center');
+        fbox(rx + dieW / 2 + 4, bot - 14, 26, 12, loadColor(Pl[1].u)); tx('RDMA口', rx + dieW / 2 + 17, bot + 2, PLANES[1].color, '8.5px Inter', 'center');
+        tx('1 卡 = 2 计算 Die(UMA·OS 视为单 device) + 2 IO Die · 对外 UB口(绿)/RDMA口(橙)', PAD, H - 8, P.mut, '10px Inter');
+      } else tx(isCore ? `32 AI Core（Cube∶Vector≈8∶1）· 点核下钻 Tile · 选中核 ${selCore}` : '2 计算 Die（各 ≈16 AI Core，UMA 合并为单 device）· 在热力镜头点 Die 看核', PAD, H - 8, P.mut, '10px Inter');
+    }
+    // 单 AI Core 内部：Cube/Vector ALU + L0A/L0B/L0C buffer + SIMD/SIMT lane（L0 Tile 粒度）
+    function drawTile(top: number, bot: number) {
+      const isVec = selCore % 8 === 7, base = coreVal(selCore);
+      tx(`物理链路 · ${scopeName()} · 单 AI Core 内部（${isVec ? 'AIV/Vector' : 'AIC/Cube'} #${selCore}）`, PAD, PAD + 16, P.ink2, '12.5px Inter');
+      const x0 = PAD + 20, w = W - 2 * PAD - 40, h = bot - top;
+      fbox(x0, top, w, h, P.neutral, ENTITY_COLORS.computeDie);
+      const aluW = w * 0.34, aluH = h * 0.42;           // ALU block
+      fbox(x0 + 20, top + 28, aluW, aluH, loadColor(base));
+      tx(isVec ? 'Vector ALU (SIMD)' : 'Cube ALU (矩阵乘)', x0 + 20 + aluW / 2, top + 28 + aluH / 2 + 4, inkOf(loadColor(base)), '600 12px Inter', 'center');
+      ['L0A', 'L0B', 'L0C'].forEach((nm, i) => { const bx = x0 + 40 + aluW, by = top + 28 + i * (aluH / 3 + 6), bh = aluH / 3 - 2; fbox(bx, by, w * 0.18, bh, P.track, ENTITY_COLORS.ioDie); tx(nm + ' buffer', bx + 8, by + bh / 2 + 3, P.ink, '10px Inter'); });
+      const lanes = 16, ly = top + 28 + aluH + 26, lw = (w - 40) / lanes;   // SIMD/SIMT lanes (live tileVal)
+      tx('SIMD/SIMT lane（颜色=流水/访存占用 · 随回放）', x0 + 20, ly - 8, P.ink2, '10.5px Inter');
+      for (let t = 0; t < lanes; t++) fbox(x0 + 20 + t * lw, ly, lw - 2, h - (ly - top) - 16, loadColor(tileVal(t)));
+      tx('AI Core = Cube/Vector ALU + 片上 L0A/B/C buffer + SIMD/SIMT lane（L0 Tile 粒度）', PAD, H - 8, P.mut, '10px Inter');
     }
   }, [lens, selLevel, selSpod, selCab, selNode, selNpu, selCore, pods, CAB, NODES, NPN, NPC, NPU_TOT, step, P, metricVal, util01, faultAt, nodeMean, cabMean, spodMean, dieVal, coreVal, tileVal, scopeName, planeUtil, domains, domActive, tcell, flowCfg]);
 
@@ -512,6 +560,11 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
     else if (h.kind === 'iodie') t = `IO Die ${h.idx} · 互联/IO（无算力负载）`;
     else if (h.kind === 'corec') t = `${h.idx % 8 === 7 ? 'AIV/Vector' : 'AIC/Cube'} #${h.idx} · ${Math.round(coreVal(h.idx) * 100)}%`;
     else if (h.kind === 'tilec') t = `Tile/lane #${h.idx} · ${Math.round(tileVal(h.idx) * 100)}%`;
+    // parent-context strip (上层) cells
+    else if (h.kind === 'pspod') t = `超节点#${h.idx + 1} · 平均 ${Math.round(spodMean(h.idx) * 100)}%（点击切换）`;
+    else if (h.kind === 'pcab') t = `机柜${h.idx + 1} · 均值 ${Math.round(cabMean(selSpod, h.idx) * 100)}%（点击切换）`;
+    else if (h.kind === 'pnode') { const cb = (selNode / NODES_PER_CAB) | 0; t = `机柜${cb + 1}·节点${h.idx + 1} · 均值 ${Math.round(nodeMean(selSpod, cb * NODES_PER_CAB + h.idx) * 100)}%（点击切换）`; }
+    else if (h.kind === 'pcard') t = `卡 r${h.idx}（rank ${selNode * NPN + h.idx}）· ${Math.round(util01(selSpod, selNode, h.idx) * 100)}%（点击切换）`;
     if (!t) { if (tip) setTip(null); return; }
     setTip({ x: e.clientX, y: e.clientY, t });
   };
@@ -523,6 +576,11 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
     else if (h.kind === 'npuc' || h.kind === 'pnpu') setSelNpu(h.idx);
     else if (h.kind === 'diec') { setSelNpu((j) => (j < 0 ? 0 : j)); setSelLevel('core'); }
     else if (h.kind === 'corec') { setSelCore(h.idx); setSelLevel('tile'); }
+    // parent-context strip: switch to a sibling at the SAME level (no need to go back up)
+    else if (h.kind === 'pspod') { setSelSpod(h.idx); setSelCab(0); setSelNode(0); setSelNpu(-1); }
+    else if (h.kind === 'pcab') { setSelCab(h.idx); setSelNode(h.idx * NODES_PER_CAB); setSelNpu(-1); }
+    else if (h.kind === 'pnode') { const cb = (selNode / NODES_PER_CAB) | 0; setSelNode(cb * NODES_PER_CAB + h.idx); setSelNpu(-1); }
+    else if (h.kind === 'pcard') setSelNpu(h.idx);
   };
 
   // level navigation (axis + breadcrumb)
