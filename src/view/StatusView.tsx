@@ -28,7 +28,7 @@ import {
   type Gen,
 } from '../scene/data';
 import { TOK } from '../content';
-import { comet2d, connDot2d } from './wire2d';
+import { busWire2d } from './wire2d';
 
 // ── shared button language (matches ClusterView / PlaneView) ──
 const ACCENT = '#4369ef';
@@ -272,7 +272,10 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
     const PAD = 16, STRIP_H = 54;   // STRIP_H = parent-context strip height (heat lens)
     const tx = (s: string, x: number, y: number, c: string, f = '11px Inter', a: CanvasTextAlign = 'left') => { ctx.fillStyle = c; ctx.font = f; ctx.textAlign = a; ctx.fillText(s, x, y); ctx.textAlign = 'left'; };
     const bar = (x: number, y: number, w: number, h: number, u: number, c?: string) => { ctx.fillStyle = P.track; ctx.fillRect(x, y, w, h); ctx.fillStyle = c ?? loadColor(u); ctx.fillRect(x, y, w * u, h); };
-    const line = (x1: number, y1: number, x2: number, y2: number, c: string, w: number, dash = false, caps = false) => { ctx.save(); ctx.strokeStyle = c; ctx.lineWidth = w; ctx.lineCap = 'round'; if (dash) { ctx.setLineDash([6, 5]); ctx.lineDashOffset = -step * 3; } ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.restore(); if (dash) comet2d(ctx, [x1, y1], [x2, y2], c, Math.max(w * 1.3, 1.6), step * 0.12); if (caps) { const r = Math.max(w * 1.5, 2.6); connDot2d(ctx, x1, y1, r, c); connDot2d(ctx, x2, y2, r, c); } };
+    // 所有连线统一 bus-wiring「平面」样式：管体描边 + connector 接点 + 运行(playing)时沿线流动彗星。
+    const line = (x1: number, y1: number, x2: number, y2: number, c: string, w: number, dash = false, caps = false) => {
+      busWire2d(ctx, [[x1, y1], [x2, y2]], c, w, { phase: step * 0.12, flowing: playing && (dash || caps), caps, dash: dash ? [6, 5] : null, tube: w >= 1.5, alpha: ctx.globalAlpha });
+    };
     const dia = (x: number, y: number, r: number, c: string, lab?: string) => { ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fillStyle = P.neutral; ctx.fill(); ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.stroke(); if (lab) tx(lab, x, y + 3.5, P.ink, '10px Inter', 'center'); };
     const fbox = (x: number, y: number, w: number, h: number, fill: string, stroke?: string) => { ctx.fillStyle = fill; ctx.fillRect(x, y, w, h); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.4; ctx.strokeRect(x, y, w, h); } };
 
@@ -615,22 +618,35 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
 
   // inline SVG: card associations (node-internal 8 NPU ↔ L1 ↔ CPU), focused card highlighted (mirrors 平面视图)
   const assocSVG = () => {
-    const W = 240, cx = W / 2;
+    const W = 240, cx = W / 2, apex: [number, number] = [cx, 42];
+    // bus-wiring connector 接点：色环 + 白芯
+    const dot = (x: number, y: number, c: string, r = 3.2) => (<><circle cx={x} cy={y} r={r} fill={c} /><circle cx={x} cy={y} r={r * 0.42} fill="#fff" /></>);
+    // 运行(playing)时沿线流动的白色彗星（SMIL 连续动画，独立于 step 重渲染）
+    const flow = (x1: number, y1: number, x2: number, y2: number) => playing ? (
+      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#fff" strokeWidth={1.6} strokeLinecap="round" strokeDasharray="3 13" opacity={0.85}>
+        <animate attributeName="stroke-dashoffset" from="16" to="0" dur="0.6s" repeatCount="indefinite" />
+      </line>
+    ) : null;
     return (
       <svg viewBox={`0 0 ${W} 150`} style={{ width: '100%', height: 'auto', display: 'block', marginTop: 4 }}>
-        <polygon points={`${cx},10 ${cx + 18},26 ${cx},42 ${cx - 18},26`} fill="none" stroke={loadColor(sm)} strokeWidth={2} />
-        <text x={cx} y={30} fontSize={9} fill="var(--tx)" textAnchor="middle">L1</text>
         {Array.from({ length: NPN }, (_, j) => {
           const u = util01(selSpod, selNode, j), x = 14 + j * ((W - 28) / (NPN - 1)), focus = j === cardJ;
           return (
             <g key={j}>
-              <line x1={x} y1={84} x2={cx} y2={42} stroke={loadColor(u)} strokeWidth={focus ? 3 : 1.5} opacity={focus ? 1 : 0.6} />
+              <line x1={x} y1={84} x2={apex[0]} y2={apex[1]} stroke={loadColor(u)} strokeWidth={focus ? 3.2 : 1.8} strokeLinecap="round" opacity={focus ? 1 : 0.6} />
+              {flow(x, 84, apex[0], apex[1])}
+              {dot(x, 84, loadColor(u), focus ? 3.6 : 3)}
               <rect x={x - 12} y={84} width={24} height={22} rx={3} fill={loadColor(u)} stroke={focus ? ACCENT : 'transparent'} strokeWidth={focus ? 2.5 : 0} />
               <text x={x} y={99} fontSize={8.5} fill={inkOf(loadColor(u))} textAnchor="middle">r{j}</text>
             </g>
           );
         })}
-        <line x1={cx} y1={128} x2={cx} y2={42} stroke={PLANES[0].color} strokeWidth={1.5} opacity={0.7} />
+        <line x1={cx} y1={128} x2={apex[0]} y2={apex[1]} stroke={PLANES[0].color} strokeWidth={1.8} strokeLinecap="round" opacity={0.7} />
+        {flow(cx, 128, apex[0], apex[1])}
+        {dot(cx, 128, PLANES[0].color)}
+        <polygon points={`${cx},10 ${cx + 18},26 ${cx},42 ${cx - 18},26`} fill="none" stroke={loadColor(sm)} strokeWidth={2} strokeLinejoin="round" />
+        {dot(apex[0], apex[1], loadColor(sm), 3.6)}
+        <text x={cx} y={28} fontSize={9} fill="var(--tx)" textAnchor="middle">L1</text>
         <rect x={cx - 34} y={128} width={68} height={20} rx={10} fill="none" stroke="var(--bd2)" />
         <text x={cx} y={142} fontSize={9} fill="var(--tx2)" textAnchor="middle">{TOK.kunpeng} CPU</text>
       </svg>

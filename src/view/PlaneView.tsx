@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GENERATIONS, PARTITION_PALETTE, PARALLEL_COLORS, PARTITION_META, UB_LEVELS, COMM_PATTERNS, LAYER_INFO, CORES_PER_CARD, ENTITY_COLORS, UB_COORD, RUN_SCHED, PLANES, LEVEL_PHYS, loadColor, nodeLoad, isHot, stateColor, type Gen, type PartitionDim, type RunMode, type RunPhase } from '../scene/data';
 import { TOK } from '../content';
-import { comet2d, connDot2d, busWire2d } from './wire2d';
+import { connDot2d, busWire2d } from './wire2d';
 
 // short plane tag per level (drawn in the narrow 层级图 axis gutter)
 const PLANE_TAG: Record<string, string> = { ub: 'UB·SU', rdma: 'RDMA·SO', multi: '多平面', none: '片上' };
@@ -633,14 +633,14 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
       });
 
       // ── containment links for the selected chain (parent cell → child block centre) ──
+      // bus-wiring 管体 + connector 接点；运行(playing)时按状态(load)上色并沿线流动。
       if (hi) {
-        ctx.strokeStyle = SEL; ctx.globalAlpha = 0.9; ctx.lineWidth = 0.12; ctx.lineCap = 'round';
         for (let li = 1; li < levels.length; li++) {
           const pa = cellXY(li - 1, hi.lo[li - 1]);                                  // parent cell
           const ca = cellXY(li, hi.lo[li]), cb = cellXY(li, Math.min(levels[li].count - 1, hi.hi[li] - 1));
-          ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo((ca[0] + cb[0]) / 2, (ca[1] + cb[1]) / 2); ctx.stroke();
+          const col = curPhase ? heatOf(li * 1009 + 3) : SEL;                        // running → 状态色，不用蓝色覆盖
+          busWire2d(ctx, [pa, [(ca[0] + cb[0]) / 2, (ca[1] + cb[1]) / 2]], col, 0.12, { phase: phaseRef.current * 0.5, flowing: playing, caps: true, alpha: 0.92, corner: 0.18 });
         }
-        ctx.globalAlpha = 1;
       }
 
       ctx.restore();
@@ -687,13 +687,10 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
       const edge = (p: [number, number], q: [number, number], style: ST, sa: number, sb: number, boost: number, wpx: number, alpha = 0.8) => {
         const ld = curPhase ? linkLoad(sa, sb, boost) : -2;
         const flowing = playing && ld >= 0;
-        if (flowing) { ctx.setLineDash(style === 'ub' ? [13 / s, 5 / s] : style === 'so' ? [6 / s, 4 / s] : [1.6 / s, 4 / s]); ctx.lineDashOffset = -(phaseRef.current * 22) / s; }
-        else { ctx.setLineDash(style === 'ub' ? [] : style === 'so' ? [6 / s, 4 / s] : [1.6 / s, 4 / s]); ctx.lineDashOffset = 0; }
-        ctx.lineWidth = wpx / s; ctx.lineCap = 'round'; ctx.globalAlpha = alpha;
-        ctx.strokeStyle = ld <= -2 ? NED : loadColor(ld);
-        ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
-        ctx.setLineDash([]); ctx.lineDashOffset = 0; ctx.globalAlpha = 1;
-        if (flowing) comet2d(ctx, p, q, loadColor(ld), (wpx * 1.3) / s, -phaseRef.current * 0.5);
+        const dash = style === 'ub' ? null : style === 'so' ? [6 / s, 4 / s] : [1.6 / s, 4 / s];
+        const color = ld <= -2 ? NED : loadColor(ld);
+        // 管体描边(暗外廓+实色管身) + plane 虚线分类 + 运行时沿线彗星；端点交由器件 glyph 充当。
+        busWire2d(ctx, [p, q], color, wpx / s, { phase: -phaseRef.current * 0.5, flowing, caps: false, alpha, dash, tube: true, corner: (wpx / s) * 2 });
       };
       // NPU 图元 = 950 卡 (与层级图/顶视图一致)：卡体 + 暗底凹槽内 4 Die（2 计算 teal + 2 IO 蓝灰），
       // 凹槽让 Die 与卡体(青/热力色)拉开对比，不再糊成一片。
@@ -1002,24 +999,20 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
       const b = Math.floor(hk / CPB), cab = Math.floor(b / BPC);
       const [hx, hy] = cardXY(hk); const hc: [number, number] = [hx + L.cs / 2, hy + L.cs / 2];
       ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      // 选中链路 fabric 改用 bus-wiring 管体 + connector 接点；运行(playing)时按状态(load)上色、沿线流动，不再用蓝色覆盖。
+      const linkCol = (sa: number, sb: number) => curPhase ? loadColor(linkLoad(sa, sb, 0.1)) : SEL;
+      const ph = phaseRef.current * 0.5;
       // L3 (on select): selected card's CABINET → all other cabinets (super-node Clos fabric)
       const [ccx, ccy] = cabXY(cab); const cc: [number, number] = [ccx + L.cw / 2, ccy + L.ch / 2];
       if (isSel && L.nC > 1) {
-        ctx.strokeStyle = SEL; ctx.shadowColor = SEL; ctx.shadowBlur = 5; ctx.lineWidth = 1.1 / s; ctx.globalAlpha = 0.4; ctx.beginPath();
-        for (let oc = 0; oc < L.nC; oc++) { if (oc === cab) continue; const [ox, oy] = cabXY(oc); ctx.moveTo(cc[0], cc[1]); ctx.lineTo(ox + L.cw / 2, oy + L.ch / 2); }
-        ctx.stroke();
-        // highlight the selected cabinet + blade frames (selection = ONE accent, not per-level colour)
-        ctx.shadowBlur = 0; ctx.globalAlpha = 0.95; ctx.strokeStyle = SEL; ctx.lineWidth = 1.6 / s; ctx.strokeRect(ccx, ccy, L.cw, L.ch);
+        for (let oc = 0; oc < L.nC; oc++) { if (oc === cab) continue; const [ox, oy] = cabXY(oc); busWire2d(ctx, [cc, [ox + L.cw / 2, oy + L.ch / 2]], linkCol(cab * 97 + oc, oc * 31 + 3), 1.1 / s, { phase: ph, flowing: playing, caps: false, alpha: 0.4, tube: true }); }
+        ctx.shadowBlur = 0; ctx.globalAlpha = 0.95; ctx.strokeStyle = SEL; ctx.lineWidth = 1.6 / s; ctx.strokeRect(ccx, ccy, L.cw, L.ch); ctx.globalAlpha = 1;
       }
       // L2: hovered blade centre → other blade centres in the cabinet
       const [bx, by] = bladeXY(cab, b % BPC); const bc: [number, number] = [bx + L.bw / 2, by + L.bh / 2];
-      ctx.strokeStyle = SEL; ctx.shadowColor = SEL; ctx.shadowBlur = 10; ctx.lineWidth = 1.6 / s; ctx.globalAlpha = 0.9; ctx.beginPath();
-      for (let bl = 0; bl < BPC; bl++) { const blade = cab * BPC + bl; if (blade >= L.nB || blade === b) continue; const [ox, oy] = bladeXY(cab, bl); ctx.moveTo(bc[0], bc[1]); ctx.lineTo(ox + L.bw / 2, oy + L.bh / 2); }
-      ctx.stroke();
+      for (let bl = 0; bl < BPC; bl++) { const blade = cab * BPC + bl; if (blade >= L.nB || blade === b) continue; const [ox, oy] = bladeXY(cab, bl); busWire2d(ctx, [bc, [ox + L.bw / 2, oy + L.bh / 2]], linkCol(blade * 131 + 5, b * 131 + 5), 1.6 / s, { phase: ph, flowing: playing, caps: true, alpha: 0.9, tube: true }); }
       // L1: hovered card → its 7 board siblings
-      ctx.strokeStyle = SEL; ctx.shadowColor = SEL; ctx.shadowBlur = 12; ctx.lineWidth = 2 / s; ctx.globalAlpha = 1; ctx.beginPath();
-      for (let l = 0; l < CPB; l++) { const k2 = b * CPB + l; if (k2 >= L.N1 || k2 === hk) continue; const [sx, sy] = cardXY(k2); ctx.moveTo(hc[0], hc[1]); ctx.lineTo(sx + L.cs / 2, sy + L.cs / 2); }
-      ctx.stroke();
+      for (let l = 0; l < CPB; l++) { const k2 = b * CPB + l; if (k2 >= L.N1 || k2 === hk) continue; const [sx, sy] = cardXY(k2); busWire2d(ctx, [hc, [sx + L.cs / 2, sy + L.cs / 2]], linkCol(k2, hk), 2 / s, { phase: ph, flowing: playing, caps: true, alpha: 1, tube: true }); }
       ctx.restore();
       // selected / hovered card outline (on top, no blur) — rounded, PTO-blue, bolder when selected
       ctx.lineWidth = (isSel ? 3.4 : 2.5) / s; ctx.strokeStyle = SEL;

@@ -1971,11 +1971,11 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
   // get their own colour AND thickness, not one colour per level.
   // thickness = BANDWIDTH (structural, per level — passed in `width`); colour = per-link UTILISATION
   // (load → discrete state). So 粗绿=大带宽但闲、细红=小带宽却被打满. (one state = one colour, no gradient)
-  const heatLines = (pts: [number, number, number][], loadFn: (s: number) => number, width: number, key: string, opacity = 0.9) => {
+  const heatLines = (pts: [number, number, number][], loadFn: (s: number) => number, width: number, key: string, opacity = 0.9, active = false) => {
     if (pts.length === 0) return null;
     const cols: [number, number, number][] = [];
     for (let s = 0; s < pts.length / 2; s++) { const [r, g, b] = loadRGB(loadFn(s)); cols.push([r / 255, g / 255, b / 255], [r / 255, g / 255, b / 255]); }
-    return <Wire key={key} points={pts} segments vertexColors={cols} lineWidth={width} opacity={opacity} />;
+    return <Wire key={key} points={pts} segments vertexColors={cols} lineWidth={width} opacity={opacity} active={active} speed={1.0} />;
   };
   const segLoad = (band: number, s: number): number => (((band * 7919 + s * 131 + 3) >>> 0) % 11 === 0 ? -1 : nodeLoad(band * 7919 + s * 131 + 3, statKind ?? undefined) + (linkActive(band) ? 0.3 : -0.16));   // ~9% offline (灰)
   // backbone connector (between-level). observation → per-link heatmap buckets; else → faint muted line.
@@ -1988,7 +1988,7 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
     if (fine && focus !== upper && G.N > 256) return false;
     return heat
       // heat mode respects focus: bright on the focused band, faint elsewhere (was always 0.9 → dense)
-      ? heatLines(pts, (s) => segLoad(upper, s), bw, `b${upper}`, focus === null ? 0.5 : focus === upper ? 0.95 : 0.08)
+      ? heatLines(pts, (s) => segLoad(upper, s), bw, `b${upper}`, focus === null ? 0.5 : focus === upper ? 0.95 : 0.08, statKind != null)
       : <Wire points={pts} segments color={mute(color)} lineWidth={focus === upper ? 2.4 : focus === null ? base * 0.8 : 0.4} opacity={focus === upper ? 0.9 : focus === null ? 0.26 : 0.1} active={focus === upper} speed={0.6} />;
   };
   const xL = -G.fieldW / 2 - 0.9;
@@ -2115,10 +2115,10 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
       {/* the full card↔card mesh is thousands of links → keep it a FAINT texture so it doesn't
           flood the view; click a card/blade/cabinet for its own crisp peer mesh (cyan, below). */}
       {peers && G.l1mesh.length > 0 && (heat
-        ? heatLines(G.l1mesh, (s) => nodeLoad(s * 131 + 11, statKind ?? undefined) + (computeNow ? 0.24 : -0.12), 1.4, 'l1', 0.3)
+        ? heatLines(G.l1mesh, (s) => nodeLoad(s * 131 + 11, statKind ?? undefined) + (computeNow ? 0.24 : -0.12), 1.4, 'l1', 0.3, statKind != null)
         : <Wire points={G.l1mesh} segments color={mute(L(1))} lineWidth={1.4} opacity={focus === null ? 0.3 : 0.1} />)}
       {peers && G.l2mesh.length > 0 && (heat
-        ? heatLines(G.l2mesh, (s) => nodeLoad(s * 197 + 23, statKind ?? undefined) + (commNow && collective === 'a2a' ? 0.36 : -0.14), 1.0, 'l2', 0.32)
+        ? heatLines(G.l2mesh, (s) => nodeLoad(s * 197 + 23, statKind ?? undefined) + (commNow && collective === 'a2a' ? 0.36 : -0.14), 1.0, 'l2', 0.32, statKind != null)
         : <Wire points={G.l2mesh} segments color={mute(L(2))} lineWidth={1.0} opacity={focus === null ? 0.34 : 0.12} />)}
 
       {/* L1 blade + L2 cabinet markers (instanced) — clickable to highlight their up/down-stream + peer mesh */}
@@ -2185,8 +2185,12 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
       {selPath && (
         <group>
           {/* the chain objects themselves glow amber (recoloured in the effect); here just the route + peer mesh */}
-          {selPath.pSegs.length > 0 && <Wire points={selPath.pSegs} segments color="#22d3ee" lineWidth={2.6} opacity={0.95} active speed={1.1} />}
-          {selPath.vSegs.length > 0 && <Wire points={selPath.vSegs} segments color="#4369ef" lineWidth={3} opacity={0.92} active speed={1.0} />}
+          {selPath.pSegs.length > 0 && (heat
+            ? heatLines(selPath.pSegs, (s) => nodeLoad(s * 131 + 17, statKind ?? undefined) + 0.12, 2.6, 'selp', 0.95, true)
+            : <Wire points={selPath.pSegs} segments color="#22d3ee" lineWidth={2.6} opacity={0.95} active speed={1.1} />)}
+          {selPath.vSegs.length > 0 && (heat
+            ? heatLines(selPath.vSegs, (s) => nodeLoad(s * 197 + 23, statKind ?? undefined) + 0.18, 3, 'selv', 0.95, true)
+            : <Wire points={selPath.vSegs} segments color="#4369ef" lineWidth={3} opacity={0.92} active speed={1.0} />)}
           {selPath.dieK !== null ? (
             <group>
               {/* die-operator inset for a selected card (reuses DieDetail), with a leader line */}
