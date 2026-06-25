@@ -94,6 +94,7 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [tip, setTip] = useState<{ x: number; y: number; t: string } | null>(null);
+  const flowRef = useRef(0);   // 连线彗星流动相位 —— 始终推进（即使未播放，连线持续流动）
 
   useEffect(() => { setSelSpod(0); setSelCab(0); setSelNode(0); setSelNpu(-1); }, [gen]);
   useEffect(() => {
@@ -272,9 +273,10 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
     const PAD = 16, STRIP_H = 54;   // STRIP_H = parent-context strip height (heat lens)
     const tx = (s: string, x: number, y: number, c: string, f = '11px Inter', a: CanvasTextAlign = 'left') => { ctx.fillStyle = c; ctx.font = f; ctx.textAlign = a; ctx.fillText(s, x, y); ctx.textAlign = 'left'; };
     const bar = (x: number, y: number, w: number, h: number, u: number, c?: string) => { ctx.fillStyle = P.track; ctx.fillRect(x, y, w, h); ctx.fillStyle = c ?? loadColor(u); ctx.fillRect(x, y, w * u, h); };
-    // 所有连线统一 bus-wiring「平面」样式：管体描边 + connector 接点 + 运行(playing)时沿线流动彗星。
+    // 所有连线统一 bus-wiring「平面」样式：管体描边 + connector 接点 + 始终沿线流动彗星（未播放也流动；
+    // 状态/状态色仍只随 playing 的 step 变化）。
     const line = (x1: number, y1: number, x2: number, y2: number, c: string, w: number, dash = false, caps = false) => {
-      busWire2d(ctx, [[x1, y1], [x2, y2]], c, w, { phase: step * 0.12, flowing: playing && (dash || caps), caps, dash: dash ? [6, 5] : null, tube: w >= 1.5, alpha: ctx.globalAlpha });
+      busWire2d(ctx, [[x1, y1], [x2, y2]], c, w, { phase: flowRef.current, flowing: dash || caps, caps, dash: dash ? [6, 5] : null, tube: w >= 1.5, alpha: ctx.globalAlpha });
     };
     const dia = (x: number, y: number, r: number, c: string, lab?: string) => { ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fillStyle = P.neutral; ctx.fill(); ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.stroke(); if (lab) tx(lab, x, y + 3.5, P.ink, '10px Inter', 'center'); };
     const fbox = (x: number, y: number, w: number, h: number, fill: string, stroke?: string) => { ctx.fillStyle = fill; ctx.fillRect(x, y, w, h); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.4; ctx.strokeRect(x, y, w, h); } };
@@ -548,6 +550,14 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
 
   useEffect(() => { draw(); }, [draw]);
   useEffect(() => { const onR = () => draw(); window.addEventListener('resize', onR); return () => window.removeEventListener('resize', onR); }, [draw]);
+  // 含连线的镜头（通信域 / 物理链路）逐帧重绘，让连线彗星持续流动（即使未播放）。
+  useEffect(() => {
+    if (lens !== 'domain' && lens !== 'phys') return;
+    let last = performance.now(), raf = 0;
+    const loop = (now: number) => { const dt = Math.min(0.05, (now - last) / 1000); last = now; flowRef.current += dt * 1.2; draw(); raf = requestAnimationFrame(loop); };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [lens, draw]);
 
   // hover + click on the canvas
   const hitTest = (mx: number, my: number) => { for (const c of cells.current) if (mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) return c; return null; };

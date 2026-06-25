@@ -158,7 +158,7 @@ function SelHierPanel({ sel, dark, onClose, playing, headRef, phaseRef, runMode 
     // conn — while playing a STRONG (active) link marches (流量流动); idle keeps static SEL/neutral
     const conn = (x1: number, y1: number, x2: number, y2: number, strong: boolean) => {
       const base = strong ? SEL : (dark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.16)');
-      busWire2d(ctx, [[x1, y1], [x2, y2]], (playing && strong) ? loadColor(0.62) : base, strong ? 2.4 : 1, { phase: phaseRef.current * 0.5, flowing: playing && strong, caps: strong, alpha: strong ? 0.92 : 0.6, tube: strong });
+      busWire2d(ctx, [[x1, y1], [x2, y2]], (playing && strong) ? loadColor(0.62) : base, strong ? 2.4 : 1, { phase: phaseRef.current * 0.5, flowing: strong, caps: strong, alpha: strong ? 0.92 : 0.6, tube: strong });
     };
     const cl = 46, cr = W - 6, cw = cr - cl, midX = cl + cw / 2;
     const cab = sel.kind === 'l2' ? sel.cab : Math.floor(sel.blade / BPC);
@@ -214,12 +214,11 @@ function SelHierPanel({ sel, dark, onClose, playing, headRef, phaseRef, runMode 
     }
   }, [sel, dark, playing, runMode, headRef, phaseRef]);
   useEffect(() => { paint(); }, [paint]);
-  useEffect(() => {   // while playing, re-paint every frame to follow the shared play head
-    if (!playing) { if (raf.current) cancelAnimationFrame(raf.current); raf.current = null; return; }
+  useEffect(() => {   // re-paint every frame so连线彗星持续流动（即使未播放）；状态/状态色仍只随 playing 变化
     const loop = () => { paint(); raf.current = requestAnimationFrame(loop); };
     raf.current = requestAnimationFrame(loop);
     return () => { if (raf.current) cancelAnimationFrame(raf.current); raf.current = null; };
-  }, [playing, paint]);
+  }, [paint]);
   const title = sel.kind === 'npu' ? `NPU 卡 ${sel.k}` : sel.kind === 'l1' ? `L1 路由（刀片 ${sel.blade}）` : sel.kind === 'l2' ? `L2 交换（机柜 ${sel.cab}）` : sel.kind === 'cpu' ? `${TOK.kunpeng} CPU（刀片 ${sel.blade} #${sel.i + 1}）` : `${TOK.qingtian} NIC（刀片 ${sel.blade} #${sel.i + 1}）`;
   return (
     <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: PANEL_W, background: 'var(--panel)', borderLeft: '1px solid var(--bd)', boxShadow: 'var(--shadow)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', zIndex: 20, display: 'flex', flexDirection: 'column', padding: '12px 13px', boxSizing: 'border-box' }}>
@@ -639,7 +638,7 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
           const pa = cellXY(li - 1, hi.lo[li - 1]);                                  // parent cell
           const ca = cellXY(li, hi.lo[li]), cb = cellXY(li, Math.min(levels[li].count - 1, hi.hi[li] - 1));
           const col = curPhase ? heatOf(li * 1009 + 3) : SEL;                        // running → 状态色，不用蓝色覆盖
-          busWire2d(ctx, [pa, [(ca[0] + cb[0]) / 2, (ca[1] + cb[1]) / 2]], col, 0.12, { phase: phaseRef.current * 0.5, flowing: playing, caps: true, alpha: 0.92, corner: 0.18 });
+          busWire2d(ctx, [pa, [(ca[0] + cb[0]) / 2, (ca[1] + cb[1]) / 2]], col, 0.12, { phase: phaseRef.current * 0.5, flowing: true, caps: true, alpha: 0.92, corner: 0.18 });
         }
       }
 
@@ -686,11 +685,10 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
       // offline/idle keep the static plane style. phaseRef is the shared marching-ants clock.
       const edge = (p: [number, number], q: [number, number], style: ST, sa: number, sb: number, boost: number, wpx: number, alpha = 0.8) => {
         const ld = curPhase ? linkLoad(sa, sb, boost) : -2;
-        const flowing = playing && ld >= 0;
         const dash = style === 'ub' ? null : style === 'so' ? [6 / s, 4 / s] : [1.6 / s, 4 / s];
         const color = ld <= -2 ? NED : loadColor(ld);
-        // 管体描边(暗外廓+实色管身) + plane 虚线分类 + 运行时沿线彗星；端点交由器件 glyph 充当。
-        busWire2d(ctx, [p, q], color, wpx / s, { phase: -phaseRef.current * 0.5, flowing, caps: false, alpha, dash, tube: true, corner: (wpx / s) * 2 });
+        // 管体描边(暗外廓+实色管身) + plane 虚线分类 + 始终沿线彗星(未播放也流动)；端点交由器件 glyph 充当。
+        busWire2d(ctx, [p, q], color, wpx / s, { phase: -phaseRef.current * 0.5, flowing: true, caps: false, alpha, dash, tube: true, corner: (wpx / s) * 2 });
       };
       // NPU 图元 = 950 卡 (与层级图/顶视图一致)：卡体 + 暗底凹槽内 4 Die（2 计算 teal + 2 IO 蓝灰），
       // 凹槽让 Die 与卡体(青/热力色)拉开对比，不再糊成一片。
@@ -879,7 +877,7 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
       const hostWire = (style: 'ub' | 'so' | 'vpc', w: number, sa: number, sb: number, p: [number, number], q: [number, number]) => {
         const dash = style === 'ub' ? null : style === 'so' ? [L.bw * 0.05, L.bw * 0.035] : [L.bw * 0.012, L.bw * 0.03];
         const color = curPhase ? loadColor(linkLoad(sa, sb, boost)) : 'rgba(150,168,205,0.72)';
-        busWire2d(ctx, [p, q], color, w / s, { phase: -phaseRef.current * 0.5, flowing: playing && !!curPhase, caps: false, alpha: curPhase ? 0.9 : 0.62, dash, tube: false });
+        busWire2d(ctx, [p, q], color, w / s, { phase: -phaseRef.current * 0.5, flowing: true, caps: false, alpha: curPhase ? 0.9 : 0.62, dash, tube: false });
       };
       const dotR = Math.max(L.cs * 0.1, 2.4 / s), ddot = [DEV_CPU, DEV_LPO, PLANES[2].color];   // screen-constant min so dots read at overview
       for (let b = 0; b < L.nB; b++) {
@@ -1005,14 +1003,14 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
       // L3 (on select): selected card's CABINET → all other cabinets (super-node Clos fabric)
       const [ccx, ccy] = cabXY(cab); const cc: [number, number] = [ccx + L.cw / 2, ccy + L.ch / 2];
       if (isSel && L.nC > 1) {
-        for (let oc = 0; oc < L.nC; oc++) { if (oc === cab) continue; const [ox, oy] = cabXY(oc); busWire2d(ctx, [cc, [ox + L.cw / 2, oy + L.ch / 2]], linkCol(cab * 97 + oc, oc * 31 + 3), 1.1 / s, { phase: ph, flowing: playing, caps: false, alpha: 0.4, tube: true }); }
+        for (let oc = 0; oc < L.nC; oc++) { if (oc === cab) continue; const [ox, oy] = cabXY(oc); busWire2d(ctx, [cc, [ox + L.cw / 2, oy + L.ch / 2]], linkCol(cab * 97 + oc, oc * 31 + 3), 1.1 / s, { phase: ph, flowing: true, caps: false, alpha: 0.4, tube: true }); }
         ctx.shadowBlur = 0; ctx.globalAlpha = 0.95; ctx.strokeStyle = SEL; ctx.lineWidth = 1.6 / s; ctx.strokeRect(ccx, ccy, L.cw, L.ch); ctx.globalAlpha = 1;
       }
       // L2: hovered blade centre → other blade centres in the cabinet
       const [bx, by] = bladeXY(cab, b % BPC); const bc: [number, number] = [bx + L.bw / 2, by + L.bh / 2];
-      for (let bl = 0; bl < BPC; bl++) { const blade = cab * BPC + bl; if (blade >= L.nB || blade === b) continue; const [ox, oy] = bladeXY(cab, bl); busWire2d(ctx, [bc, [ox + L.bw / 2, oy + L.bh / 2]], linkCol(blade * 131 + 5, b * 131 + 5), 1.6 / s, { phase: ph, flowing: playing, caps: true, alpha: 0.9, tube: true }); }
+      for (let bl = 0; bl < BPC; bl++) { const blade = cab * BPC + bl; if (blade >= L.nB || blade === b) continue; const [ox, oy] = bladeXY(cab, bl); busWire2d(ctx, [bc, [ox + L.bw / 2, oy + L.bh / 2]], linkCol(blade * 131 + 5, b * 131 + 5), 1.6 / s, { phase: ph, flowing: true, caps: true, alpha: 0.9, tube: true }); }
       // L1: hovered card → its 7 board siblings
-      for (let l = 0; l < CPB; l++) { const k2 = b * CPB + l; if (k2 >= L.N1 || k2 === hk) continue; const [sx, sy] = cardXY(k2); busWire2d(ctx, [hc, [sx + L.cs / 2, sy + L.cs / 2]], linkCol(k2, hk), 2 / s, { phase: ph, flowing: playing, caps: true, alpha: 1, tube: true }); }
+      for (let l = 0; l < CPB; l++) { const k2 = b * CPB + l; if (k2 >= L.N1 || k2 === hk) continue; const [sx, sy] = cardXY(k2); busWire2d(ctx, [hc, [sx + L.cs / 2, sy + L.cs / 2]], linkCol(k2, hk), 2 / s, { phase: ph, flowing: true, caps: true, alpha: 1, tube: true }); }
       ctx.restore();
       // selected / hovered card outline (on top, no blur) — rounded, PTO-blue, bolder when selected
       ctx.lineWidth = (isSel ? 3.4 : 2.5) / s; ctx.strokeStyle = SEL;
@@ -1073,38 +1071,30 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
   // redraw on colour / size changes
   useEffect(() => { draw(); }, [draw]);
 
-  // selection 涟漪: while a device is selected (and not already redrawing via playback), repaint
-  // each frame so the ripple highlight pulses. Selection auto-focuses the cabinet → only ~8 blades
-  // render, so the per-frame cost is small.
+  // 执行时序 master clock + 连线流动时钟。phaseRef（连线彗星流动相位）始终推进——即使未播放，
+  // 连线也持续流动；headRef（决定状态/状态色的播放头）仅在 playing 时推进，所以未播放时只流动、
+  // 不产生状态变化/状态色。未播放时仅在「连线可见」(放大到器件层 / 有选中) 才逐帧重绘，控制开销。
   useEffect(() => {
-    if (layout !== 'devices' || !selDev || playing) return;
-    let raf = 0;
-    const loop = () => { draw(); raf = requestAnimationFrame(loop); };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [layout, selDev, playing, draw]);
-
-  // 执行时序 master clock: advances the play head (card-wash + flow), shared with the swimlane
-  // via headRef. Runs in both layouts (so the swimlane head keeps moving); only the top view
-  // needs a per-frame canvas redraw for the wash/flow.
-  useEffect(() => {
-    if (!playing) { if (rafRef.current) cancelAnimationFrame(rafRef.current); rafRef.current = null; return; }
     let last = performance.now();
     const seg = phaseSegments(runMode);
     const loop = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
-      headRef.current = (headRef.current + dt / 7) % 1;   // ≈7s per training iteration
-      phaseRef.current += dt * 1.4;                       // marching-ants dash offset
-      // colour is constant within a phase → only the top view's marching-ants need a per-frame
-      // redraw; otherwise redraw both views on a phase change so the wash steps forward.
-      const id = (seg.find((s) => headRef.current < s.t1)?.p ?? seg[seg.length - 1].p).id;
-      const flowVisible = (layout === 'top' || layout === 'devices') && !!tf.current && tf.current.s * L.cs > 4;
-      if (flowVisible || id !== lastPhaseRef.current) { lastPhaseRef.current = id; draw(); }
+      phaseRef.current += dt * 1.4;                       // 连线流动相位（始终推进）
+      if (playing) {
+        headRef.current = (headRef.current + dt / 7) % 1;   // ≈7s per training iteration
+        const id = (seg.find((s) => headRef.current < s.t1)?.p ?? seg[seg.length - 1].p).id;
+        const flowVisible = (layout === 'top' || layout === 'devices') && !!tf.current && tf.current.s * L.cs > 4;
+        if (flowVisible || id !== lastPhaseRef.current) { lastPhaseRef.current = id; draw(); }
+      } else {
+        // 未播放：仅推进连线流动并重绘（不动 headRef → 不改状态/状态色）
+        const detail = !!tf.current && tf.current.s * L.cs > 4;
+        if (detail || selDev || selL || selTop) draw();
+      }
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); rafRef.current = null; };
-  }, [playing, draw, layout]);
+  }, [playing, draw, layout, runMode, selDev, selL, selTop, L.cs]);
   useEffect(() => {
     const onR = () => { tf.current = null; draw(); };   // re-fit on resize
     window.addEventListener('resize', onR);
