@@ -28,7 +28,7 @@ import {
   type Gen,
 } from '../scene/data';
 import { TOK } from '../content';
-import { comet2d } from './wire2d';
+import { comet2d, connDot2d } from './wire2d';
 
 // ── shared button language (matches ClusterView / PlaneView) ──
 const ACCENT = '#4369ef';
@@ -272,7 +272,7 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
     const PAD = 16, STRIP_H = 54;   // STRIP_H = parent-context strip height (heat lens)
     const tx = (s: string, x: number, y: number, c: string, f = '11px Inter', a: CanvasTextAlign = 'left') => { ctx.fillStyle = c; ctx.font = f; ctx.textAlign = a; ctx.fillText(s, x, y); ctx.textAlign = 'left'; };
     const bar = (x: number, y: number, w: number, h: number, u: number, c?: string) => { ctx.fillStyle = P.track; ctx.fillRect(x, y, w, h); ctx.fillStyle = c ?? loadColor(u); ctx.fillRect(x, y, w * u, h); };
-    const line = (x1: number, y1: number, x2: number, y2: number, c: string, w: number, dash = false) => { ctx.save(); ctx.strokeStyle = c; ctx.lineWidth = w; ctx.lineCap = 'round'; if (dash) { ctx.setLineDash([6, 5]); ctx.lineDashOffset = -step * 3; } ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.restore(); if (dash) comet2d(ctx, [x1, y1], [x2, y2], c, Math.max(w * 1.3, 1.6), step * 0.12); };
+    const line = (x1: number, y1: number, x2: number, y2: number, c: string, w: number, dash = false, caps = false) => { ctx.save(); ctx.strokeStyle = c; ctx.lineWidth = w; ctx.lineCap = 'round'; if (dash) { ctx.setLineDash([6, 5]); ctx.lineDashOffset = -step * 3; } ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.restore(); if (dash) comet2d(ctx, [x1, y1], [x2, y2], c, Math.max(w * 1.3, 1.6), step * 0.12); if (caps) { const r = Math.max(w * 1.5, 2.6); connDot2d(ctx, x1, y1, r, c); connDot2d(ctx, x2, y2, r, c); } };
     const dia = (x: number, y: number, r: number, c: string, lab?: string) => { ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fillStyle = P.neutral; ctx.fill(); ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.stroke(); if (lab) tx(lab, x, y + 3.5, P.ink, '10px Inter', 'center'); };
     const fbox = (x: number, y: number, w: number, h: number, fill: string, stroke?: string) => { ctx.fillStyle = fill; ctx.fillRect(x, y, w, h); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.4; ctx.strokeRect(x, y, w, h); } };
 
@@ -451,7 +451,7 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
         const x0 = cx - (cols * bw + (cols - 1) * 16) / 2;
         for (let i = 0; i < cfg.N; i++) {
           const c = i % cols, r = (i / cols) | 0, x = x0 + c * (bw + 16), y = areaTop + r * (bh + 16), v = cfg.val(i);
-          line(x + bw / 2, y, cx, hubY + 18, loadColor(v), 2.4, isNode);
+          line(x + bw / 2, y, cx, hubY + 18, loadColor(v), 2.4, isNode, true);
           const picked = isNode && i === selNpu;
           fbox(x, y, bw, bh, loadColor(v), picked ? ACCENT : undefined);
           if (picked) { ctx.lineWidth = 3; ctx.strokeStyle = ACCENT; ctx.strokeRect(x + 1.5, y + 1.5, bw - 3, bh - 3); }
@@ -463,9 +463,9 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
           // 鲲鹏 CPU (UB→L1) + 擎天 NIC (VPC) — the third plane
           const cpuY = areaBot - 18, cpw = 96, ch2 = 30;
           fbox(cx - cpw - 30, cpuY - ch2, cpw, ch2, P.neutral, PLANES[0].color); tx(`${TOK.kunpeng}CPU`, cx - cpw - 30 + cpw / 2, cpuY - ch2 / 2 + 4, P.ink, '10px Inter', 'center');
-          line(cx - 30, cpuY - ch2 / 2, cx, hubY + 18, loadColor(Pl[0].u), 2);
+          line(cx - 30, cpuY - ch2 / 2, cx, hubY + 18, loadColor(Pl[0].u), 2, false, true);
           fbox(cx + 30, cpuY - ch2, cpw, ch2, P.neutral, PLANES[2].color); tx(`${NIC_LBL}NIC`, cx + 30 + cpw / 2, cpuY - ch2 / 2 + 4, P.ink, '10px Inter', 'center');
-          line(cx + 30, cpuY - ch2 / 2, cx - 30 + cpw, cpuY - ch2 / 2, loadColor(Pl[3].u), 2, true);
+          line(cx + 30, cpuY - ch2 / 2, cx - 30 + cpw, cpuY - ch2 / 2, loadColor(Pl[3].u), 2, true, true);
           tx('CPU→L1 = UB(绿) · CPU→NIC→数据中心 = VPC(紫)', cx, cpuY + 12, P.mut, '9px Inter', 'center');
         }
         tx(`${cfg.N} 个 ${cfg.unit} · 经 ${hubLab} ${selLevel === 'cluster' ? 'scale-out 全互联' : 'UB 全互联'}`, PAD, areaTop - 8, P.mut, '10px Inter');

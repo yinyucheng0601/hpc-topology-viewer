@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GENERATIONS, PARTITION_PALETTE, PARALLEL_COLORS, PARTITION_META, UB_LEVELS, COMM_PATTERNS, LAYER_INFO, CORES_PER_CARD, ENTITY_COLORS, UB_COORD, RUN_SCHED, PLANES, LEVEL_PHYS, loadColor, nodeLoad, isHot, stateColor, type Gen, type PartitionDim, type RunMode, type RunPhase } from '../scene/data';
 import { TOK } from '../content';
-import { comet2d, connDot2d } from './wire2d';
+import { comet2d, connDot2d, busWire2d } from './wire2d';
 
 // short plane tag per level (drawn in the narrow 层级图 axis gutter)
 const PLANE_TAG: Record<string, string> = { ub: 'UB·SU', rdma: 'RDMA·SO', multi: '多平面', none: '片上' };
@@ -158,10 +158,7 @@ function SelHierPanel({ sel, dark, onClose, playing, headRef, phaseRef, runMode 
     // conn — while playing a STRONG (active) link marches (流量流动); idle keeps static SEL/neutral
     const conn = (x1: number, y1: number, x2: number, y2: number, strong: boolean) => {
       const base = strong ? SEL : (dark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.16)');
-      ctx.save(); ctx.lineCap = 'round'; ctx.strokeStyle = base; ctx.lineWidth = strong ? 2 : 1; ctx.globalAlpha = strong ? 0.85 : 0.6;
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.globalAlpha = 1; ctx.restore();
-      if (playing && strong) comet2d(ctx, [x1, y1], [x2, y2], loadColor(0.62), 2.6, phaseRef.current * 0.5);
-      if (strong) { connDot2d(ctx, x1, y1, 2.8, base); connDot2d(ctx, x2, y2, 2.8, base); }
+      busWire2d(ctx, [[x1, y1], [x2, y2]], (playing && strong) ? loadColor(0.62) : base, strong ? 2.4 : 1, { phase: phaseRef.current * 0.5, flowing: playing && strong, caps: strong, alpha: strong ? 0.92 : 0.6, tube: strong });
     };
     const cl = 46, cr = W - 6, cw = cr - cl, midX = cl + cw / 2;
     const cab = sel.kind === 'l2' ? sel.cab : Math.floor(sel.blade / BPC);
@@ -883,12 +880,9 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
     if (links && s * L.bw > 14) {
       const boost = curPhase?.kind === 'comm' ? 0.2 : -0.15;
       const hostWire = (style: 'ub' | 'so' | 'vpc', w: number, sa: number, sb: number, p: [number, number], q: [number, number]) => {
-        ctx.setLineDash(style === 'ub' ? [] : style === 'so' ? [L.bw * 0.05, L.bw * 0.035] : [L.bw * 0.012, L.bw * 0.03]);
-        ctx.lineWidth = w / s; ctx.lineCap = 'round';
-        ctx.strokeStyle = curPhase ? loadColor(linkLoad(sa, sb, boost)) : 'rgba(150,168,205,0.72)';
-        ctx.globalAlpha = curPhase ? 0.9 : 0.62;
-        ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
-        if (playing && curPhase) comet2d(ctx, p, q, loadColor(linkLoad(sa, sb, boost)), (w * 1.3) / s, -phaseRef.current * 0.5);
+        const dash = style === 'ub' ? null : style === 'so' ? [L.bw * 0.05, L.bw * 0.035] : [L.bw * 0.012, L.bw * 0.03];
+        const color = curPhase ? loadColor(linkLoad(sa, sb, boost)) : 'rgba(150,168,205,0.72)';
+        busWire2d(ctx, [p, q], color, w / s, { phase: -phaseRef.current * 0.5, flowing: playing && !!curPhase, caps: false, alpha: curPhase ? 0.9 : 0.62, dash, tube: false });
       };
       const dotR = Math.max(L.cs * 0.1, 2.4 / s), ddot = [DEV_CPU, DEV_LPO, PLANES[2].color];   // screen-constant min so dots read at overview
       for (let b = 0; b < L.nB; b++) {
@@ -901,9 +895,9 @@ export function PlaneView({ gen, dark }: { gen: Gen; dark: boolean }) {
         hostWire('so',  1.8, b * 131 + 12, b * 131 + 22, [dxs[2], npuY], [dxs[2], dy]);   // NPU → LPO (scale-out 光 · 长虚)
         hostWire('vpc', 1.4, b * 131 + 13, b * 131 + 23, [dxs[3], dy],   [dxs[0], dy]);   // 擎天 NIC → CPU (VPC · 点线)
         ctx.setLineDash([]); ctx.globalAlpha = 1;
-        // endpoint device dots (so the connectors read as device→device even before the glyphs)
+        // endpoint device dots — bus-wiring connector 接点（色环 + 白芯）
         const dpos = [dxs[0], dxs[2], dxs[3]];
-        for (let i = 0; i < 3; i++) { ctx.fillStyle = ddot[i]; ctx.beginPath(); ctx.arc(dpos[i], dy, dotR, 0, 7); ctx.fill(); }
+        for (let i = 0; i < 3; i++) connDot2d(ctx, dpos[i], dy, dotR, ddot[i]);
       }
     }
     // node physical devices drawn AS OBJECTS (鲲鹏 CPU · L1 交换 · LPO · 擎天 NIC) — need zoom to be legible
