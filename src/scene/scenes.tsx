@@ -2253,13 +2253,16 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
           {/* the chain objects themselves glow amber (recoloured in the effect); here just the route + peer mesh */}
           {/* scopeOnly: 关系=细的统一色线 (peer mesh 青弧 / 骨干 蓝)，状态留在卡块上 → 关系看得清；
               standalone: 仍用按负载热力的粗管。 */}
-          {/* scopeOnly: peer mesh 不画（见 meshPairs 注释，关系由中枢-辐条 vSegs 表达）；骨干=细蓝直线，
-              无彗星，安静可读。standalone: 仍按负载粗管。 */}
-          {!scopeOnly && selPath.pSegs.length > 0 && (heat
-            ? heatLines(selPath.pSegs, (s) => nodeLoad(s * 131 + 17, statKind ?? undefined) + 0.12, 2.6, 'selp', 0.95, true)
-            : <Wire points={selPath.pSegs} segments color="#22d3ee" lineWidth={2.6} opacity={0.95} active speed={1.1} />)}
+          {/* scopeOnly (联动控制台): render the selected 链路 with the SAME bus-wiring language as
+              平面视图「器件互联」— 圆角管体 + 沿线流动彗星 + 同级 peer mesh 青弧 + 骨干蓝管。
+              (the chain is bounded to a blade/cabinet, so real tubes are cheap.) standalone: 负载粗管。 */}
+          {selPath.pSegs.length > 0 && (scopeOnly
+            ? <Wire points={selPath.pSegs} segments color="#22d3ee" lineWidth={1.9} opacity={0.9} active speed={1.1} />
+            : (heat
+              ? heatLines(selPath.pSegs, (s) => nodeLoad(s * 131 + 17, statKind ?? undefined) + 0.12, 2.6, 'selp', 0.95, true)
+              : <Wire points={selPath.pSegs} segments color="#22d3ee" lineWidth={2.6} opacity={0.95} active speed={1.1} />))}
           {selPath.vSegs.length > 0 && (scopeOnly
-            ? <Wire points={selPath.vSegs} segments color="#5b86ff" lineWidth={1.1} opacity={0.7} maxTubes={0} />
+            ? <Wire points={selPath.vSegs} segments color="#4369ef" lineWidth={2.4} opacity={0.92} active speed={1.0} />
             : (heat
               ? heatLines(selPath.vSegs, (s) => nodeLoad(s * 197 + 23, statKind ?? undefined) + 0.18, 3, 'selv', 0.95, true)
               : <Wire points={selPath.vSegs} segments color="#4369ef" lineWidth={3} opacity={0.92} active speed={1.0} />))}

@@ -225,15 +225,32 @@ function Smartscape({ N, nCabs, nBlades, focus, setFocus, metric, wlKind, step, 
     Le === 2 ? { Le: 1, idx: 0 } : Le === 3 ? { Le: 2, idx: Math.floor(idx / BPC) } : Le === 4 ? { Le: 3, idx: Math.floor(idx / CPB) } : null;
 
   const els: React.ReactNode[] = [];
-  // 1) containment connectors + connector dots (focus only) — 上下层级关系
+  // connector language mirrors 平面视图「选中链路·层级图」(SelHierPanel): a solid SEL line +
+  // connector dots (色环 + 白芯) at the junctions + 运行时沿线流动的白色彗星 (SMIL marching-ants).
+  const tierH = (Le: number) => (TIERS.find((tt) => tt.Le === Le)?.h ?? 16);
+  const cdot = (x: number, y: number, c: string, k: string, r = 2.4) => (
+    <g key={k}><circle cx={x} cy={y} r={r} fill={c} /><circle cx={x} cy={y} r={r * 0.42} fill="#fff" /></g>
+  );
+  const cflow = (x1: number, y1: number, x2: number, y2: number, k: string) => (playing ? (
+    <line key={k} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#fff" strokeWidth={1.5} strokeLinecap="round" strokeDasharray="3 12" opacity={0.82}>
+      <animate attributeName="stroke-dashoffset" from="15" to="0" dur="0.6s" repeatCount="indefinite" />
+    </line>
+  ) : null);
+  // 1) containment connectors (edge-to-edge) + connector dots (focus only) — 上下层级关系
   if (focus) {
+    const parentDots = new Map<string, [number, number]>();
     rows.forEach(({ t, shown }) => {
       shown.forEach(({ idx, x }) => {
         const par = parentOf(t.Le, idx); if (!par) return;
         const pp = pos[par.Le]?.[par.idx]; if (!pp) return;
-        els.push(<line key={`c-${t.Le}-${idx}`} x1={x} y1={t.y} x2={pp.x} y2={pp.y} stroke={ACCENT} strokeWidth={1.2} strokeOpacity={0.5} />);
+        const cTop = t.y - t.h / 2, pBot = pp.y + tierH(par.Le) / 2;
+        els.push(<line key={`c-${t.Le}-${idx}`} x1={x} y1={cTop} x2={pp.x} y2={pBot} stroke={ACCENT} strokeWidth={1.3} strokeOpacity={0.55} />);
+        els.push(cflow(pp.x, pBot, x, cTop, `cf-${t.Le}-${idx}`));
+        els.push(cdot(x, cTop, ACCENT, `cd-${t.Le}-${idx}`, 2.2));
+        parentDots.set(`${par.Le}-${par.idx}`, [pp.x, pBot]);
       });
     });
+    parentDots.forEach(([px, py], k) => els.push(cdot(px, py, ACCENT, `pd-${k}`)));
     // 2) UB plane mesh between node-tier siblings (横向同级关系)
     if (planeOn.ub) {
       const nr = rows.find((r) => r.t.Le === 3); const ny = TIERS[2].y;
@@ -294,12 +311,31 @@ function Smartscape({ N, nCabs, nBlades, focus, setFocus, metric, wlKind, step, 
   const repReal = focusCard != null;   // true = 真的选到某张卡（否则是代表卡）
   els.push(<line key="div" x1={8} y1={312} x2={592} y2={312} stroke={P.line} strokeDasharray="2 4" />);
   els.push(<text key="divt" x={300} y={307} fill={P.ink3} fontSize={9} textAnchor="middle">{`—— 卡内结构 · ${repReal ? '卡' : '代表卡'} r${repCard}（${repReal ? '已选中' : '该范围首卡'}）——`}</text>);
-  // containment connectors into sub-card layers (mirrors PlaneView 器件互联 层级图):
-  // card→Die bezier, then compute Die→AI Core, AI Core→Tile.
+  // containment connectors into the sub-card layers — same bus-wiring language as 选中链路·层级图:
+  // 代表卡 → 2 计算 Die → AI Core 网格顶 → Tile 网格顶, each a solid SEL line + connector dots + 流动彗星.
   { const rp4 = pos[4]?.[repCard];
-    if (rp4) els.push(<path key="conn-card-die" d={`M ${rp4.x} 278 C ${rp4.x} 312, 195 312, 195 338`} fill="none" stroke={ACCENT} strokeWidth={1.2} strokeOpacity={0.52} strokeDasharray="3 5" />);
-    els.push(<line key="conn-die-core" x1={155} y1={371} x2={254} y2={425} stroke={ACCENT} strokeWidth={1} strokeOpacity={0.38} strokeDasharray="3 5" />);
-    els.push(<line key="conn-core-tile" x1={254} y1={458} x2={254} y2={525} stroke={ACCENT} strokeWidth={1} strokeOpacity={0.38} strokeDasharray="3 5" />);
+    const dieCx = [135, 175], dieTopY = 340, dieBotY = 370;        // compute Die centres (i=0,1) · 30px cells @ y=340
+    const coreCx = 254.5, coreTopY = 426, coreBotY = 457;          // AI Core grid (16 cols · 17px pitch) span 120..389
+    const tileCx = 230.5, tileTopY = 526;                          // Tile grid (16 cols · 14px pitch) span 120..341
+    const cardBotY = 278;                                          // just below the card glyph (card centre y=268)
+    if (rp4) {
+      dieCx.forEach((dx, di) => {
+        els.push(<line key={`cc-die-${di}`} x1={rp4.x} y1={cardBotY} x2={dx} y2={dieTopY} stroke={ACCENT} strokeWidth={1.3} strokeOpacity={0.55} />);
+        els.push(cflow(rp4.x, cardBotY, dx, dieTopY, `ccf-die-${di}`));
+        els.push(cdot(dx, dieTopY, ACCENT, `ccd-die-${di}`, 2.2));
+      });
+      els.push(cdot(rp4.x, cardBotY, ACCENT, 'ccd-card'));
+    }
+    dieCx.forEach((dx, di) => {
+      els.push(<line key={`cd-core-${di}`} x1={dx} y1={dieBotY} x2={coreCx} y2={coreTopY} stroke={ACCENT} strokeWidth={1.2} strokeOpacity={0.5} />);
+      els.push(cflow(dx, dieBotY, coreCx, coreTopY, `cdf-core-${di}`));
+      els.push(cdot(dx, dieBotY, ACCENT, `cdd-die-${di}`, 2));
+    });
+    els.push(cdot(coreCx, coreTopY, ACCENT, 'cd-core-top'));
+    els.push(<line key="cd-tile" x1={coreCx} y1={coreBotY} x2={tileCx} y2={tileTopY} stroke={ACCENT} strokeWidth={1.2} strokeOpacity={0.5} />);
+    els.push(cflow(coreCx, coreBotY, tileCx, tileTopY, 'cdf-tile'));
+    els.push(cdot(coreCx, coreBotY, ACCENT, 'cd-core-bot', 2));
+    els.push(cdot(tileCx, tileTopY, ACCENT, 'cd-tile-top'));
   }
   SUBTIERS.forEach((st) => {
     els.push(<text key={`slt-${st.key}`} x={12} y={st.y - 6} fill={ENTITY_COLORS.cube} fontSize={9} fontWeight={700}>{st.tag}</text>);
