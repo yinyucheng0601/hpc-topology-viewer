@@ -995,12 +995,12 @@ export function ClusterView() {
             overflowY: 'auto', fontSize: 12.5, lineHeight: 1.65, flexShrink: 0,
             background: 'var(--background-elevated)', color: 'var(--tx)', boxShadow: '-3px 0 12px var(--bd)',
           }}>
-            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.2, color: '#4369ef', marginBottom: 8 }}>{info.title}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.2, lineHeight: 1.3, color: '#4369ef', marginBottom: 8 }}>{info.title}</div>
             <ul style={{ margin: 0, paddingLeft: 16, color: 'var(--tx)' }}>
-              {info.lines.map((l, i) => (<li key={i} style={{ marginBottom: 5 }}>{l}</li>))}
+              {info.lines.map((l, i) => (<li key={i} style={{ marginBottom: 5, fontSize: 12, lineHeight: 1.65 }}>{l}</li>))}
             </ul>
 
-            <div style={{ margin: '16px 0 6px', fontSize: 11, fontWeight: 500, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--tx2)' }}>{`关键规格 · ${spec.code}`}</div>
+            <div style={{ margin: '16px 0 6px', fontSize: 11, fontWeight: 500, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--tx3)' }}>{`关键规格 · ${spec.code}`}</div>
             <table style={{ width: '100%', fontSize: 11.5, color: 'var(--tx)', borderCollapse: 'collapse' }}>
               <tbody>
                 {specRows.map(([k, v]) => (
@@ -1012,12 +1012,12 @@ export function ClusterView() {
               </tbody>
             </table>
 
-            <div style={{ margin: '16px 0 6px', fontSize: 11, fontWeight: 500, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--tx2)' }}>相比 A3 的演进</div>
+            <div style={{ margin: '16px 0 6px', fontSize: 11, fontWeight: 500, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--tx3)' }}>相比 A3 的演进</div>
             <ul style={{ margin: 0, paddingLeft: 16, color: 'var(--tx)', fontSize: 11.5, lineHeight: 1.6 }}>
               {CHANGES.map((c, i) => (<li key={i} style={{ marginBottom: 4 }}>{c}</li>))}
             </ul>
 
-            <div style={{ margin: '16px 0 6px', fontSize: 11, fontWeight: 500, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--tx2)' }}>数据来源</div>
+            <div style={{ margin: '16px 0 6px', fontSize: 11, fontWeight: 500, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--tx3)' }}>数据来源</div>
             <div style={{ fontSize: 10.5, color: 'var(--tx2)', lineHeight: 1.7 }}>
               {SOURCES.map((s, i) => (<div key={i}>{s}</div>))}
             </div>

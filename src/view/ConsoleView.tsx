@@ -294,6 +294,13 @@ function Smartscape({ N, nCabs, nBlades, focus, setFocus, metric, wlKind, step, 
   const repReal = focusCard != null;   // true = 真的选到某张卡（否则是代表卡）
   els.push(<line key="div" x1={8} y1={312} x2={592} y2={312} stroke={P.line} strokeDasharray="2 4" />);
   els.push(<text key="divt" x={300} y={307} fill={P.ink3} fontSize={9} textAnchor="middle">{`—— 卡内结构 · ${repReal ? '卡' : '代表卡'} r${repCard}（${repReal ? '已选中' : '该范围首卡'}）——`}</text>);
+  // containment connectors into sub-card layers (mirrors PlaneView 器件互联 层级图):
+  // card→Die bezier, then compute Die→AI Core, AI Core→Tile.
+  { const rp4 = pos[4]?.[repCard];
+    if (rp4) els.push(<path key="conn-card-die" d={`M ${rp4.x} 278 C ${rp4.x} 312, 195 312, 195 338`} fill="none" stroke={ACCENT} strokeWidth={1.2} strokeOpacity={0.52} strokeDasharray="3 5" />);
+    els.push(<line key="conn-die-core" x1={155} y1={371} x2={254} y2={425} stroke={ACCENT} strokeWidth={1} strokeOpacity={0.38} strokeDasharray="3 5" />);
+    els.push(<line key="conn-core-tile" x1={254} y1={458} x2={254} y2={525} stroke={ACCENT} strokeWidth={1} strokeOpacity={0.38} strokeDasharray="3 5" />);
+  }
   SUBTIERS.forEach((st) => {
     els.push(<text key={`slt-${st.key}`} x={12} y={st.y - 6} fill={ENTITY_COLORS.cube} fontSize={9} fontWeight={700}>{st.tag}</text>);
     els.push(<text key={`sl-${st.key}`} x={12} y={st.y + 6} fill={P.ink} fontSize={12} fontWeight={600}>{st.label}</text>);
@@ -301,7 +308,9 @@ function Smartscape({ N, nCabs, nBlades, focus, setFocus, metric, wlKind, step, 
     for (let i = 0; i < st.n; i++) {
       const cx = 120 + (i % st.cols) * (st.cell + st.gap), cy = st.y - 6 + Math.floor(i / st.cols) * (st.cell + st.gap);
       const isSel = repReal && ((st.lvl === 'die' && focus?.die === i) || (st.lvl === 'core' && focus?.core === i));
-      const fill = playing ? loadColor(Math.max(0, Math.min(1, nodeLoad(repCard * st.seed + i, wlKind)))) : st.col(i);
+      // always use load-based color keyed to repCard so L0-L2 visually changes when a different
+      // node/cabinet is selected; IO Die (i≥2) keeps its structural color (no compute load).
+      const fill = (st.key === 'die' && i >= 2) ? st.col(i) : loadColor(Math.max(0, Math.min(1, nodeLoad(repCard * st.seed + i, wlKind))));
       els.push(
         <rect key={`s-${st.key}-${i}`} x={cx} y={cy} width={st.cell} height={st.cell} rx={Math.min(3, st.cell * 0.18)} fill={fill} style={{ cursor: 'pointer' }}
           stroke={isSel ? ringC : 'none'} strokeWidth={isSel ? 1.8 : 0}

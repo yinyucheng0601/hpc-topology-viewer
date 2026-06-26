@@ -691,9 +691,9 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={LBL}>回放</span>
-          <button onClick={() => setPlaying((v) => !v)} style={{ width: 28, height: 28, borderRadius: '50%', cursor: 'pointer', ...navBtn(playing) }}>{playing ? '⏸' : '▶'}</button>
+          <button onClick={() => setPlaying((v) => !v)} style={{ width: 30, height: 30, borderRadius: '50%', cursor: 'pointer', border: '1px solid var(--primary)', background: 'var(--primary)', color: 'var(--primary-foreground)', fontSize: 13, boxShadow: playing ? '0 0 0 3px rgba(67,105,239,0.25)' : 'none' }}>{playing ? '⏸' : '▶'}</button>
           <input type="range" min={0} max={STEP_MAX} value={step} onChange={(e) => setStep(+e.target.value)} style={{ width: 120, accentColor: ACCENT }} />
-          <span style={{ fontSize: 11, color: ev ? '#e5484d' : 'var(--tx2)', fontFamily: MONO, minWidth: 92 }}>{`step ${step}${ev ? ' · 机柜事件' : ''}`}</span>
+          <span style={{ fontSize: 11, fontFamily: MONO, minWidth: 92, ...(ev ? { color: '#e5484d', background: 'rgba(255,75,123,0.12)', border: '1px solid rgba(255,75,123,0.35)', borderRadius: 6, padding: '2px 6px' } : { color: 'var(--tx2)' }) }}>{`step ${step}${ev ? ' · 机柜事件' : ''}`}</span>
         </div>
       </div>
 
@@ -708,8 +708,8 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
           [`${PH[phase].label} · #${step}`, '当前工况 / step', 'var(--tx)'],
         ] as [string, string, string][]).map(([v, l, c]) => (
           <div key={l} style={{ background: 'var(--panel-solid)', border: '1px solid var(--bd)', borderRadius: 10, padding: '7px 14px', minWidth: 96 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, color: c, ...TNUM }}>{v}</div>
-            <div style={{ fontSize: 10.5, color: 'var(--tx3)' }}>{l}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, fontFamily: MONO, color: c, ...TNUM }}>{v}</div>
+            <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--tx3)' }}>{l}</div>
           </div>
         ))}
       </div>
@@ -723,13 +723,13 @@ export function StatusView({ gen, dark }: { gen: Gen; dark: boolean }) {
               border: `1px solid ${selLevel === l.id ? ACCENT : 'var(--bd)'}`, background: selLevel === l.id ? 'var(--state-sel)' : 'var(--panel-solid)',
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--tx)' }}>{l.nm}</span>
-                <span style={{ fontSize: 9, color: 'var(--tx3)' }}>{l.su}</span>
+                <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--tx)' }}>{l.nm}</span>
+                <span style={{ fontSize: 10, color: 'var(--tx3)' }}>{l.su}</span>
               </div>
-              <div style={{ height: 7, background: 'var(--btn)', borderRadius: 5, overflow: 'hidden', margin: '5px 0 3px' }}>
-                <div style={{ height: '100%', width: `${Math.round(l.p50 * 100)}%`, background: loadColor(l.p50), borderRadius: 5 }} />
+              <div style={{ height: 3, background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', borderRadius: 2, overflow: 'hidden', margin: '5px 0 3px' }}>
+                <div style={{ height: '100%', width: `${Math.round(l.p50 * 100)}%`, background: loadColor(l.p50), borderRadius: 2 }} />
               </div>
-              <div style={{ fontSize: 9, color: 'var(--tx2)', fontFamily: MONO }}>{`典型 ${Math.round(l.p50 * 100)}% · 红 ${(l.red * 100).toFixed(1)}% · 峰 ${Math.round(l.p95 * 100)}%`}</div>
+              <div style={{ fontSize: 10, color: 'var(--tx2)', fontFamily: MONO }}>{`典型 ${Math.round(l.p50 * 100)}% · 红 ${(l.red * 100).toFixed(1)}% · 峰 ${Math.round(l.p95 * 100)}%`}</div>
             </div>
             {i < axis.length - 1 && <div style={{ alignSelf: 'center', color: 'var(--tx3)', padding: '0 3px', fontSize: 10 }}>▸</div>}
           </div>
