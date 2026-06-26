@@ -1920,9 +1920,11 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
     if (cm?.instanceColor) cm.instanceColor.needsUpdate = true;
   }, [G, phase, computeNow, commNow, useChip, chipTex, partition, part, sel, status, scopeOnly, dark]);
 
-  // imperative single-instance hover for the instanced-card path (avoids 8 K-loop per move)
+  // imperative single-instance hover for the instanced-card path (avoids 8 K-loop per move).
+  // scopeOnly (联动控制台): NO hover visual — hovering must not turn a block into a selected-looking
+  // state (the tooltip still fires via onHoverInfo). Only click selects.
   const hoverCard = (k: number | null) => {
-    const nm = cardInst.current; if (!nm || useChip) return;
+    const nm = cardInst.current; if (!nm || useChip || scopeOnly) return;
     const m = new THREE.Matrix4(), col = new THREE.Color(), prev = lastHov.current;
     const put = (i: number, on: boolean) => { m.makeScale(on ? cardW * 1.5 : cardW, on ? cardH * 1.8 : cardH, on ? cardW * 1.5 : cardW); m.setPosition(G.cardX[i], G.yCard, G.cardZ[i]); nm.setMatrixAt(i, m); nm.setColorAt(i, col.set(on ? '#bdf0cf' : chipTex ? '#ffffff' : ENTITY_COLORS.card)); };
     if (prev >= 0 && prev !== k && prev < G.N) put(prev, false);
@@ -1961,21 +1963,12 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
       }
       cards.push(k);   // the card itself always highlights, regardless of direction
     };
-    // peer mesh (层级内 card↔card / node↔node). scopeOnly → 抬成上拱「弧线」(细分成段)，让全互联的每条
-    // 关系彼此错开、不再与卡块叠成一团红；否则保持直线段（standalone fullpod 原样）。
+    // peer mesh (层级内 card↔card / node↔node). scopeOnly → 不画全互联直线（N² 条会糊成一团，无法阅读）：
+    // 关系改由「中枢-辐条」表达——卡都汇聚到刀片(=L1 UB 交换/板内全互联枢纽)、刀片汇聚到机柜，见 vSegs。
+    // standalone fullpod 仍画原直线段。
     const meshPairs = (xs: number[], f: (x: number) => [number, number, number]) => {
-      for (let i = 0; i < xs.length; i++) for (let j = i + 1; j < xs.length; j++) {
-        const a = f(xs[i]), b = f(xs[j]);
-        if (scopeOnly) {
-          const dist = Math.hypot(a[0] - b[0], a[2] - b[2]), h = Math.min(1.5, 0.28 + dist * 0.5);
-          const mx = (a[0] + b[0]) / 2, my = a[1] + h, mz = (a[2] + b[2]) / 2;   // quadratic-bezier control above the row
-          let prev = a; const K = 9;
-          for (let s = 1; s <= K; s++) { const t = s / K, u = 1 - t;
-            const cur: [number, number, number] = [u * u * a[0] + 2 * u * t * mx + t * t * b[0], u * u * a[1] + 2 * u * t * my + t * t * b[1], u * u * a[2] + 2 * u * t * mz + t * t * b[2]];
-            pSegs.push(prev, cur); prev = cur;
-          }
-        } else pSegs.push(a, b);
-      }
+      if (scopeOnly) return;
+      for (let i = 0; i < xs.length; i++) for (let j = i + 1; j < xs.length; j++) pSegs.push(f(xs[i]), f(xs[j]));
     };
     let dieK: number | null = null, label = '', labelPos: [number, number, number] = [0, 0, 0], superP = 0;
     const upFromCab = (c: number) => { superP = G.cabSuper[c]; if (!showUp) return; vSegs.push(caPos(c), sPos(superP)); if (podCount > 1) vSegs.push(sPos(superP), G.cluster); };
@@ -2260,13 +2253,13 @@ export function FullPodScene({ scale, podCount, full, gen, overlays, runMode, ph
           {/* the chain objects themselves glow amber (recoloured in the effect); here just the route + peer mesh */}
           {/* scopeOnly: 关系=细的统一色线 (peer mesh 青弧 / 骨干 蓝)，状态留在卡块上 → 关系看得清；
               standalone: 仍用按负载热力的粗管。 */}
-          {selPath.pSegs.length > 0 && (scopeOnly
-            ? <Wire points={selPath.pSegs} segments color="#22d3ee" lineWidth={0.9} opacity={0.5} active speed={0.8} />
-            : (heat
-              ? heatLines(selPath.pSegs, (s) => nodeLoad(s * 131 + 17, statKind ?? undefined) + 0.12, 2.6, 'selp', 0.95, true)
-              : <Wire points={selPath.pSegs} segments color="#22d3ee" lineWidth={2.6} opacity={0.95} active speed={1.1} />))}
+          {/* scopeOnly: peer mesh 不画（见 meshPairs 注释，关系由中枢-辐条 vSegs 表达）；骨干=细蓝直线，
+              无彗星，安静可读。standalone: 仍按负载粗管。 */}
+          {!scopeOnly && selPath.pSegs.length > 0 && (heat
+            ? heatLines(selPath.pSegs, (s) => nodeLoad(s * 131 + 17, statKind ?? undefined) + 0.12, 2.6, 'selp', 0.95, true)
+            : <Wire points={selPath.pSegs} segments color="#22d3ee" lineWidth={2.6} opacity={0.95} active speed={1.1} />)}
           {selPath.vSegs.length > 0 && (scopeOnly
-            ? <Wire points={selPath.vSegs} segments color="#4369ef" lineWidth={1.3} opacity={0.72} active speed={0.7} />
+            ? <Wire points={selPath.vSegs} segments color="#5b86ff" lineWidth={1.1} opacity={0.7} maxTubes={0} />
             : (heat
               ? heatLines(selPath.vSegs, (s) => nodeLoad(s * 197 + 23, statKind ?? undefined) + 0.18, 3, 'selv', 0.95, true)
               : <Wire points={selPath.vSegs} segments color="#4369ef" lineWidth={3} opacity={0.92} active speed={1.0} />))}
